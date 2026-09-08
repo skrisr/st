@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#06c755">
 <title>Simple Talk</title>
+<meta property="og:title" content="Simple Talk">
+<meta property="og:description" content="名前を入れるだけで参加できるチャット">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary">
 <style>
   :root{
     --line-green:#06c755;
@@ -96,6 +100,55 @@
   #gate button:not(:disabled):active{ opacity:.8; }
   #gate .err{ color:var(--danger); font-size:12.5px; margin-top:8px; min-height:16px; }
   #gate .hint{ font-size:11px; color:var(--text-sub); margin-top:18px; line-height:1.6; }
+
+  #chat{ display:flex; flex-direction:row; }
+  #main{ flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; }
+  #side{
+    width:var(--side-w,260px); min-width:180px; max-width:60vw; flex-shrink:0;
+    background:var(--bg-panel); border-right:1px solid var(--border);
+    display:flex; flex-direction:column; min-height:0;
+  }
+  #side-head{
+    height:var(--header-h); display:flex; align-items:center; justify-content:space-between;
+    padding:0 6px 0 14px; background:var(--header-bg); color:var(--header-text);
+    font-weight:700; font-size:15px; flex-shrink:0;
+  }
+  #side-head .icon-btn{ background:none;border:none;color:var(--header-text);font-size:17px;cursor:pointer;width:34px;height:34px;border-radius:50%; }
+  #side-list{ flex:1; overflow-y:auto; padding:6px 0 20px; }
+  .side-label{ font-size:10.5px; color:var(--text-sub); padding:10px 14px 4px; letter-spacing:.04em; }
+  .side-item{
+    display:flex; align-items:center; gap:10px; padding:9px 12px; cursor:pointer;
+    border-left:3px solid transparent;
+  }
+  .side-item:hover{ background:var(--chip-bg); }
+  .side-item.active{ background:var(--chip-bg); border-left-color:var(--line-green); }
+  .side-item .avatar{ width:34px;height:34px;font-size:14px;margin:0; }
+  .side-item .si-body{ flex:1; min-width:0; }
+  .side-item .si-name{ font-size:13.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .side-item .si-sub{ font-size:11px; color:var(--text-sub); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .side-item .si-badge{
+    background:var(--danger); color:#fff; border-radius:10px; font-size:10.5px; font-weight:700;
+    padding:1px 7px; flex-shrink:0;
+  }
+  .side-item .si-dot{ width:7px;height:7px;border-radius:50%;background:var(--line-green);flex-shrink:0; }
+  #splitter{
+    width:5px; flex-shrink:0; cursor:col-resize; background:var(--border);
+    transition:background .15s;
+  }
+  #splitter:hover, #splitter.dragging{ background:var(--line-green); }
+  #mobile-tabs{ display:none; }
+  #back-btn{ display:none; }
+
+  @media (max-width:760px){
+    #splitter{ display:none; }
+    #side{
+      position:absolute; inset:0; width:auto; max-width:none; z-index:20;
+      border-right:none;
+    }
+    body.show-talk #side{ display:none; }
+    body:not(.show-talk) #main{ display:none; }
+    #back-btn{ display:flex; }
+  }
 
   #header{
     height:var(--header-h); min-height:var(--header-h);
@@ -524,11 +577,25 @@
     </div>
   </div>
 
-  <div id="chat" style="display:none; flex:1; min-height:0; flex-direction:column;">
+  <div id="chat" style="display:none; flex:1; min-height:0;">
+    <div id="side">
+      <div id="side-head">
+        <span id="side-title">Simple Talk</span>
+        <button class="icon-btn" id="side-settings" title="設定">⚙️</button>
+      </div>
+      <div id="side-list"></div>
+    </div>
+    <div id="splitter" title="ドラッグで幅を変えられます"></div>
+    <div id="main">
+    <div id="mobile-tabs">
+      <button class="mtab on" data-tab="talk">トーク</button>
+      <button class="mtab" data-tab="list">一覧</button>
+    </div>
     <div id="header">
-      <div class="room-icon">👥</div>
+      <button class="icon-btn" id="back-btn" aria-label="一覧へ戻る">‹</button>
+      <div class="room-icon" id="room-icon">👥</div>
       <div class="titles" id="members-open">
-        <div class="name">みんなの部屋</div>
+        <div class="name" id="room-title">みんなの部屋</div>
         <div class="members" id="member-count"><span class="conn-dot" id="conn-dot"></span><span id="member-text">接続中…</span></div>
       </div>
       <button class="icon-btn" id="search-btn" title="検索" aria-label="メッセージを検索">🔍</button>
@@ -588,6 +655,7 @@
       <textarea id="text-input" rows="1" placeholder="メッセージを入力"></textarea>
       <button class="round-btn" id="send-btn" aria-label="送信">➤</button>
       <input type="file" id="file-input" accept="image/*" hidden>
+    </div>
     </div>
   </div>
 
@@ -660,6 +728,23 @@ let storageFull = false;
 let dbUsedBytes = 0;
 let dbFull = false;
 let pinnedMsg = null;
+let currentChannel = 'main';
+const unreadByChannel = new Map();
+const lastMsgByChannel = new Map();
+let reads = safeParse(localStorage.getItem('line_chat_reads')) || {};
+
+function dmKey(a, b) { return 'dm:' + [String(a), String(b)].sort().join(':'); }
+function isDm(ch) { return String(ch).startsWith('dm:'); }
+function dmPartner(ch) {
+  if (!isDm(ch)) return null;
+  const [, a, b] = ch.split(':');
+  return a === myDbid ? b : a;
+}
+function channelTitle(ch) {
+  if (!isDm(ch)) return 'みんなの部屋';
+  const p = dmPartner(ch);
+  return (knownUsers.get(p) || {}).name || '不明な相手';
+}
 let hasOlder = true;
 let loadingOlder = false;
 let unreadCount = 0;
@@ -825,6 +910,10 @@ async function enterChat() {
   if (draft) { textInput.value = draft; autoGrow(textInput); }
   $('#snippet-btn').addEventListener('click', openSnippets);
   checkPermalink();
+  lastReadAt = reads[currentChannel] || lastReadAt;
+  paintSide();
+  loadChannelPreviews();
+  if (window.innerWidth > 760) document.body.classList.add('show-talk');
   refreshStorageUsage();
   refreshDbUsage();
   loadPinned();
@@ -863,6 +952,7 @@ async function loadLatest() {
   messagesEl.innerHTML = '<div class="empty-hint">読み込み中…</div>';
   const { data, error } = await supabase
     .from('messages').select('*')
+    .eq('channel', currentChannel)
     .order('created_at', { ascending: false })
     .limit(PAGE_SIZE);
 
@@ -882,9 +972,9 @@ async function loadLatest() {
 
 async function loadAround(target) {
   const [before, after] = await Promise.all([
-    supabase.from('messages').select('*').lt('created_at', target.created_at)
+    supabase.from('messages').select('*').eq('channel', currentChannel).lt('created_at', target.created_at)
       .order('created_at', { ascending: false }).limit(30),
-    supabase.from('messages').select('*').gte('created_at', target.created_at)
+    supabase.from('messages').select('*').eq('channel', currentChannel).gte('created_at', target.created_at)
       .order('created_at', { ascending: true }).limit(30),
   ]);
   const list = [...(before.data || []).reverse(), ...(after.data || [])];
@@ -906,6 +996,7 @@ async function loadOlder() {
   messagesEl.insertBefore(note, messagesEl.firstChild.nextSibling);
 
   const { data } = await supabase.from('messages').select('*')
+    .eq('channel', currentChannel)
     .lt('created_at', msgs[0].created_at)
     .order('created_at', { ascending: false })
     .limit(PAGE_SIZE);
@@ -986,6 +1077,17 @@ function subscribeRealtime() {
 }
 
 function onInsert(m) {
+  const ch = m.channel || 'main';
+  if (ch !== currentChannel) {
+    if (isDm(ch) && !ch.includes(myDbid)) return;
+    lastMsgByChannel.set(ch, m);
+    if (m.sender_dbid !== myDbid) {
+      unreadByChannel.set(ch, (unreadByChannel.get(ch) || 0) + 1);
+      notifyIncoming(m);
+    }
+    paintSide();
+    return;
+  }
   if (m.client_id) {
     const temp = messagesEl.querySelector(`[data-client-id="${cssEscape(m.client_id)}"]`);
     if (temp) temp.remove();
@@ -1060,7 +1162,7 @@ async function trackPresence() {
   try {
     await presenceChannel.track({
       dbid: myDbid, name: myName, color: myColor || colorForDbid(myDbid),
-      last_read_at: lastReadAt, online_at: new Date().toISOString(),
+      last_read_at: lastReadAt, channel: currentChannel, online_at: new Date().toISOString(),
     });
   } catch (_) {  }
 }
@@ -1075,10 +1177,11 @@ function onPresenceSync() {
     count++;
     const dbid = p.dbid || key;
     const prev = knownUsers.get(dbid) || {};
-    knownUsers.set(dbid, { name: p.name || prev.name || '？', color: p.color || colorForDbid(dbid), online: true, last_read_at: p.last_read_at });
+    knownUsers.set(dbid, { name: p.name || prev.name || '？', color: p.color || colorForDbid(dbid), online: true, last_read_at: p.last_read_at, channel: p.channel });
   }
-  memberTextEl.textContent = `${count}人が参加中`;
+  if (!isDm(currentChannel)) memberTextEl.textContent = `${count}人が参加中`;
   updateReadReceipts();
+  paintSide();
 }
 
 function setConnected(ok) {
@@ -1098,6 +1201,7 @@ async function refreshSince() {
   if (!msgs.length) { await loadLatest(); return; }
   const last = msgs[msgs.length - 1].created_at;
   const { data } = await supabase.from('messages').select('*')
+    .eq('channel', currentChannel)
     .gt('created_at', last).order('created_at', { ascending: true }).limit(200);
   for (const m of data || []) onInsert(m);
 }
@@ -1503,7 +1607,8 @@ async function toggleReaction(messageId, emoji) {
 }
 
 function updateReadReceipts() {
-  const others = [...knownUsers.entries()].filter(([d, u]) => u.online && d !== myDbid);
+  const others = [...knownUsers.entries()]
+    .filter(([d, u]) => u.online && d !== myDbid && (u.channel || 'main') === currentChannel);
   for (const row of messagesEl.querySelectorAll('.msg-row.mine')) {
     const m = msgById.get(mkey(row.dataset.msgId));
     const mark = row.querySelector('.read-mark');
@@ -1518,12 +1623,15 @@ function markRead() {
   const newest = msgs[msgs.length - 1].created_at;
   if (lastReadAt && ts(lastReadAt) >= ts(newest)) return;
   lastReadAt = newest;
+  reads[currentChannel] = lastReadAt;
+  localStorage.setItem('line_chat_reads', JSON.stringify(reads));
   localStorage.setItem(LS.LASTSEEN, lastReadAt);
   trackPresence();
 }
 
-function showTyping({ dbid, name }) {
+function showTyping({ dbid, name, channel }) {
   if (!dbid || dbid === myDbid) return;
+  if ((channel || 'main') !== currentChannel) return;
   clearTimeout(typingTimers.get(dbid)?.timer);
   typingTimers.set(dbid, { name, timer: setTimeout(() => clearTyping(dbid), 3200) });
   paintTyping();
@@ -1549,7 +1657,7 @@ function sendTyping() {
   const now = Date.now();
   if (now - lastTypingSent < 1500 || !presenceChannel) return;
   lastTypingSent = now;
-  presenceChannel.send({ type: 'broadcast', event: 'typing', payload: { dbid: myDbid, name: myName } })
+  presenceChannel.send({ type: 'broadcast', event: 'typing', payload: { dbid: myDbid, name: myName, channel: currentChannel } })
     .catch(() => {});
 }
 
@@ -1586,8 +1694,15 @@ function updateJumpButton() {
 $('#top-btn').addEventListener('click', () => messagesEl.scrollTo({ top: 0, behavior: 'smooth' }));
 jumpBtn.addEventListener('click', () => { unreadCount = 0; scrollToBottom(); updateJumpButton(); markRead(); });
 
+function totalUnread() {
+  let n = unreadCount;
+  for (const [ch, c] of unreadByChannel) if (ch !== currentChannel) n += c;
+  return n;
+}
+
 function updateTitleBadge() {
-  document.title = unreadCount > 0 ? `(${unreadCount})Simple Talk` : 'Simple Talk';
+  const n = totalUnread();
+  document.title = n > 0 ? `(${n})Simple Talk` : 'Simple Talk';
   updateFavicon();
 }
 
@@ -1609,6 +1724,7 @@ function focusMessage(id) {
 
 async function loadPinned() {
   const { data, error } = await supabase.from('messages').select('*')
+    .eq('channel', currentChannel)
     .not('pinned_at', 'is', null)
     .order('pinned_at', { ascending: false })
     .limit(1);
@@ -1946,6 +2062,7 @@ async function sendMessage() {
     image_url: imageUrl,
     image_bytes: file ? file.size : null,
     client_id: clientId,
+    channel: currentChannel,
   });
 
   if (error) {
@@ -2198,7 +2315,7 @@ async function runSearch() {
   searchResults.innerHTML = '<div class="sr-empty">検索中…</div>';
 
   const pattern = '%' + q.replace(/[%_]/g, (c) => '\\' + c) + '%';
-  let query = supabase.from('messages').select('*').ilike('content', pattern);
+  let query = supabase.from('messages').select('*').eq('channel', currentChannel).ilike('content', pattern);
   if (searchFilterMine) query = query.eq('sender_dbid', myDbid);
   if (searchFilterImage) query = query.not('image_url', 'is', null);
   const { data, error } = await query.order('created_at', { ascending: false }).limit(50);
@@ -2282,10 +2399,8 @@ function openPeople() {
       if (dbid !== myDbid) {
         p.style.cursor = 'pointer';
         p.addEventListener('click', () => {
-          textInput.value = (textInput.value ? textInput.value.replace(/\s*$/, ' ') : '') + '@' + u.name + ' ';
           closeSheet();
-          textInput.focus();
-          updateByteCounter();
+          switchChannel(dmKey(myDbid, dbid));
         });
       }
       box.appendChild(p);
@@ -2493,6 +2608,10 @@ function openSettings() {
   delAllBtn.addEventListener('click', () => bulkDeleteMine(false));
   sheet.appendChild(delAllBtn);
 
+  const wipeBtn = el('button', '部屋のデータを全消去（全員ぶん）', 'row-btn danger');
+  wipeBtn.addEventListener('click', wipeRoom);
+  sheet.appendChild(wipeBtn);
+
   sheet.appendChild(el('label', '時間帯ごとの投稿'));
   const graph = el('div', '', 'hour-graph');
   sheet.appendChild(graph);
@@ -2585,6 +2704,127 @@ function switchRow(label, on, onToggle) {
   return row;
 }
 
+
+function paintSide() {
+  const list = $('#side-list');
+  list.textContent = '';
+
+  list.appendChild(el('div', 'ルーム', 'side-label'));
+  list.appendChild(sideItem({
+    key: 'main', icon: '👥', color: '#06c755', name: 'みんなの部屋',
+    sub: previewOfChannel('main'),
+  }));
+
+  list.appendChild(el('div', 'ダイレクトメッセージ', 'side-label'));
+  const people = [...knownUsers.entries()]
+    .filter(([d]) => d !== myDbid)
+    .sort((a, b) => Number(b[1].online) - Number(a[1].online) || String(a[1].name).localeCompare(String(b[1].name), 'ja'));
+
+  if (!people.length) {
+    list.appendChild(el('div', 'まだ他の参加者がいません', 'sr-empty'));
+    return;
+  }
+  for (const [dbid, u] of people) {
+    const ch = dmKey(myDbid, dbid);
+    list.appendChild(sideItem({
+      key: ch, initial: (u.name || '?').slice(0, 1).toUpperCase(),
+      color: u.color || colorForDbid(dbid), name: u.name,
+      sub: previewOfChannel(ch) || (u.online ? 'オンライン' : 'オフライン'),
+      online: u.online,
+    }));
+  }
+}
+
+function previewOfChannel(ch) {
+  const m = lastMsgByChannel.get(ch);
+  return m ? `${m.sender_dbid === myDbid ? 'あなた: ' : ''}${previewOf(m) || '画像'}` : '';
+}
+
+function sideItem({ key, icon, initial, color, name, sub, online }) {
+  const item = el('div', '', 'side-item' + (key === currentChannel ? ' active' : ''));
+  const av = el('div', icon || initial || '?', 'avatar');
+  av.style.background = color;
+  item.appendChild(av);
+  const body = el('div', '', 'si-body');
+  body.appendChild(el('div', name, 'si-name'));
+  if (sub) body.appendChild(el('div', sub, 'si-sub'));
+  item.appendChild(body);
+  const n = unreadByChannel.get(key) || 0;
+  if (n > 0 && key !== currentChannel) item.appendChild(el('span', String(Math.min(n, 99)), 'si-badge'));
+  else if (online) item.appendChild(el('span', '', 'si-dot'));
+  item.addEventListener('click', () => switchChannel(key));
+  return item;
+}
+
+async function switchChannel(ch) {
+  document.body.classList.add('show-talk');
+  if (ch === currentChannel) { paintSide(); return; }
+  reads[currentChannel] = lastReadAt;
+  localStorage.setItem('line_chat_reads', JSON.stringify(reads));
+
+  currentChannel = ch;
+  unreadByChannel.set(ch, 0);
+  unreadCount = 0;
+  lastReadAt = reads[ch] || null;
+  unreadBoundary = lastReadAt;
+  replyTo = null; cancelEdit(); clearPendingImage();
+  $('#reply-bar').classList.remove('open');
+  closeSearch();
+
+  const dm = isDm(ch);
+  $('#room-title').textContent = channelTitle(ch);
+  $('#room-icon').textContent = dm ? (channelTitle(ch) || '?').slice(0, 1).toUpperCase() : '👥';
+  $('#room-icon').style.background = dm ? colorForDbid(dmPartner(ch)) : '';
+  $('#member-text').textContent = dm ? '1対1のトーク' : '接続中…';
+  textInput.placeholder = dm ? `${channelTitle(ch)}さんへメッセージ` : 'メッセージを入力';
+
+  paintSide();
+  updateJumpButton();
+  await loadLatest();
+  await loadPinned();
+}
+
+$('#side-settings').addEventListener('click', openSettings);
+$('#back-btn').addEventListener('click', () => document.body.classList.remove('show-talk'));
+document.querySelectorAll('.mtab').forEach((b) => b.addEventListener('click', () => {
+  document.body.classList.toggle('show-talk', b.dataset.tab === 'talk');
+}));
+
+(function setupSplitter() {
+  const sp = $('#splitter');
+  let dragging = false;
+  const move = (x) => {
+    const w = Math.max(180, Math.min(window.innerWidth * 0.6, x));
+    document.documentElement.style.setProperty('--side-w', w + 'px');
+    localStorage.setItem('line_chat_sidew', String(w));
+  };
+  const saved = localStorage.getItem('line_chat_sidew');
+  if (saved) document.documentElement.style.setProperty('--side-w', saved + 'px');
+  sp.addEventListener('mousedown', (e) => { dragging = true; sp.classList.add('dragging'); e.preventDefault(); });
+  window.addEventListener('mousemove', (e) => { if (dragging) move(e.clientX); });
+  window.addEventListener('mouseup', () => { dragging = false; sp.classList.remove('dragging'); });
+  sp.addEventListener('touchstart', () => { dragging = true; }, { passive: true });
+  window.addEventListener('touchmove', (e) => { if (dragging) move(e.touches[0].clientX); }, { passive: true });
+  window.addEventListener('touchend', () => { dragging = false; });
+})();
+
+async function loadChannelPreviews() {
+  const { data } = await supabase.from('messages').select('*')
+    .order('created_at', { ascending: false }).limit(300);
+  for (const m of data || []) {
+    const ch = m.channel || 'main';
+    if (isDm(ch) && !ch.includes(myDbid)) continue;
+    if (!lastMsgByChannel.has(ch)) lastMsgByChannel.set(ch, m);
+    if (ch !== currentChannel && m.sender_dbid !== myDbid) {
+      const seen = reads[ch];
+      if (!seen || ts(m.created_at) > ts(seen)) {
+        unreadByChannel.set(ch, (unreadByChannel.get(ch) || 0) + 1);
+      }
+    }
+  }
+  paintSide();
+  updateTitleBadge();
+}
 
 function openBookmarks() {
   const sheet = openSheet('ブックマーク');
@@ -2683,6 +2923,36 @@ function openSnippets() {
   paint();
 }
 
+async function wipeRoom() {
+  if (!confirm('この部屋のメッセージと画像を「全員ぶん」削除します。参加者アカウントは残ります。取り消せません。')) return;
+  if (!confirm('本当に実行しますか？ この操作は元に戻せません。')) return;
+  showToast('削除中…');
+  try {
+    const folders = await supabase.storage.from(BUCKET).list('', { limit: 1000 });
+    const paths = [];
+    for (const f of folders.data || []) {
+      if (f.id) { paths.push(f.name); continue; }
+      const files = await supabase.storage.from(BUCKET).list(f.name, { limit: 1000 });
+      for (const x of files.data || []) paths.push(`${f.name}/${x.name}`);
+    }
+    for (let i = 0; i < paths.length; i += 100) {
+      await supabase.storage.from(BUCKET).remove(paths.slice(i, i + 100));
+    }
+    await supabase.from('reactions').delete().neq('emoji', '');
+    const { error } = await supabase.from('messages').delete().neq('sender_name', '\u0000');
+    if (error) throw error;
+    bookmarks.clear(); saveBookmarks();
+    pinnedMsg = null; paintPinBar();
+    storageUsedBytes = 0; applyStorageFullState();
+    closeSheet();
+    showToast('すべて削除しました');
+    await loadLatest();
+    refreshDbUsage();
+  } catch (e) {
+    showToast('削除に失敗しました: ' + (e.message || e));
+  }
+}
+
 async function bulkDeleteMine(imagesOnly) {
   const what = imagesOnly ? '自分が送った画像すべて' : '自分の発言すべて';
   if (!confirm(`${what}を削除します。取り消せません。よろしいですか？`)) return;
@@ -2716,7 +2986,8 @@ function updateFavicon() {
     x.beginPath(); x.roundRect(2, 2, 60, 60, 14); x.fill();
     x.fillStyle = '#fff'; x.font = 'bold 34px sans-serif';
     x.textAlign = 'center'; x.textBaseline = 'middle';
-    x.fillText(unreadCount > 0 ? String(Math.min(unreadCount, 99)) : '💬', 32, 34);
+    const n = totalUnread();
+    x.fillText(n > 0 ? String(Math.min(n, 99)) : '💬', 32, 34);
     let link = document.querySelector('link[rel="icon"]');
     if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link); }
     link.href = c.toDataURL('image/png');
