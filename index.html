@@ -33,6 +33,9 @@
     --header-h:56px;
     --font-scale:1;
     --dot:rgba(0,0,0,.045);
+    --bg-dim:0;
+    --radius:16px;
+    --font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
   }
   [data-theme="dark"]{
     --line-green:#06c755;
@@ -59,7 +62,7 @@
   *{box-sizing:border-box;}
   html,body{
     height:100%; margin:0; padding:0;
-    font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    font-family:var(--font-family);
     background:var(--bg-chat);
     color:var(--text-main);
     overscroll-behavior:none;
@@ -136,7 +139,6 @@
     transition:background .15s;
   }
   #splitter:hover, #splitter.dragging{ background:var(--line-green); }
-  #mobile-tabs{ display:none; }
   #back-btn{ display:none; }
 
   @media (max-width:760px){
@@ -222,6 +224,14 @@
     background-size:14px 14px;
     font-size:calc(14.5px * var(--font-scale));
   }
+  body.has-bg #messages{
+    background-image:
+      linear-gradient(rgba(0,0,0,var(--bg-dim)), rgba(0,0,0,var(--bg-dim))),
+      var(--bg-image);
+    background-size:cover;
+    background-position:center;
+    background-attachment:local;
+  }
   #top-sentinel{ height:1px; }
   .loading-older{ text-align:center; font-size:11.5px; color:var(--text-sub); padding:10px 0; }
   .day-sep{ text-align:center; margin:14px 0 8px; }
@@ -258,7 +268,7 @@
   .msg-row.mine .bubble-wrap{ flex-direction:row-reverse; }
 
   .bubble{
-    position:relative; padding:9px 12px; border-radius:16px;
+    position:relative; padding:9px 12px; border-radius:var(--radius);
     line-height:1.55; word-break:break-word; overflow-wrap:anywhere; white-space:pre-wrap;
     box-shadow:0 1px 1px rgba(0,0,0,.05); cursor:default; -webkit-user-select:text;
   }
@@ -570,10 +580,11 @@
       <div class="logo">💬</div>
       <h1>みんなの部屋</h1>
       <p class="sub">名前を入力して参加してください</p>
-      <input id="name-input" type="text" maxlength="20" placeholder="表示名（例：たろう）" autocomplete="off">
+      <input id="real-input" type="text" maxlength="30" placeholder="本名（メンバー一覧に表示）" autocomplete="off">
+      <input id="name-input" type="text" maxlength="20" placeholder="表示名（トークに出る名前）" autocomplete="off">
       <button id="enter-btn">はじめる</button>
       <div class="err" id="gate-err"></div>
-      <div class="hint">表示名は他の人と重複できません。<br>一度入室すると、次回からは自動で入室します。</div>
+      <div class="hint">本名はメンバー一覧にだけ出ます。誰が誰か分かるようにするためのものです。<br>表示名は他の人と重複できません。</div>
     </div>
   </div>
 
@@ -587,10 +598,6 @@
     </div>
     <div id="splitter" title="ドラッグで幅を変えられます"></div>
     <div id="main">
-    <div id="mobile-tabs">
-      <button class="mtab on" data-tab="talk">トーク</button>
-      <button class="mtab" data-tab="list">一覧</button>
-    </div>
     <div id="header">
       <button class="icon-btn" id="back-btn" aria-label="一覧へ戻る">‹</button>
       <div class="room-icon" id="room-icon">👥</div>
@@ -711,6 +718,7 @@ const AVATAR_COLORS = ['#f2545b','#f4a259','#e8b800','#4caf50','#00b1b5','#3f8ae
 
 let myDbid = localStorage.getItem(LS.DBID);
 let myName = localStorage.getItem(LS.NAME);
+let myReal = localStorage.getItem('line_chat_real') || '';
 let myColor = null;
 
 let msgs = [];
@@ -763,13 +771,32 @@ const PREF_DEFAULTS = {
   enterSends: true, relTime: false, showSeconds: false, group: true,
   compact: false, hideAvatar: false, noDots: false, contrast: false,
   shortLinks: false, mentionOnly: false, muteUntil: 0, accent: '',
-  jumbo: true,
+  jumbo: true, bgUrl: '', bgDim: 0, font: 'default', radius: 16, mineColor: '',
 };
 let prefs = { ...PREF_DEFAULTS, ...safeParse(localStorage.getItem(PREF_KEY)) };
 function safeParse(v) { try { return JSON.parse(v) || {}; } catch (_) { return {}; } }
 function pref(k) { return prefs[k]; }
 function setPref(k, v) { prefs[k] = v; localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); applyPrefs(); }
+const FONT_STACKS = {
+  default: '-apple-system,BlinkMacSystemFont,"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif',
+  round: '"Hiragino Maru Gothic ProN","Yu Gothic",Meiryo,sans-serif',
+  mincho: '"Hiragino Mincho ProN","Yu Mincho",serif',
+  mono: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
+};
+
 function applyPrefs() {
+  const root = document.documentElement;
+  root.style.setProperty('--font-family', FONT_STACKS[prefs.font] || FONT_STACKS.default);
+  root.style.setProperty('--radius', (prefs.radius ?? 16) + 'px');
+  root.style.setProperty('--bg-dim', String(prefs.bgDim || 0));
+  if (prefs.bgUrl) {
+    root.style.setProperty('--bg-image', `url("${prefs.bgUrl.replace(/"/g, '%22')}")`);
+    document.body.classList.add('has-bg');
+  } else {
+    document.body.classList.remove('has-bg');
+  }
+  if (prefs.mineColor) root.style.setProperty('--bubble-mine', prefs.mineColor);
+  else root.style.removeProperty('--bubble-mine');
   document.body.classList.toggle('compact', !!prefs.compact);
   document.body.classList.toggle('hide-avatar', !!prefs.hideAvatar);
   document.body.classList.toggle('no-dots', !!prefs.noDots);
@@ -828,6 +855,7 @@ function applyFontSize() {
 }
 applyTheme();
 applyFontSize();
+applyPrefs();
 
 init();
 
@@ -851,11 +879,14 @@ nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') handleEnte
 
 async function handleEnter() {
   const name = nameInput.value.trim();
+  const real = $('#real-input').value.trim();
   gateErr.textContent = '';
+  if (!real) { gateErr.textContent = '本名を入力してください。'; return; }
   if (!name) { gateErr.textContent = '表示名を入力してください。'; return; }
   if (name.length > 20) { gateErr.textContent = '表示名は20文字以内にしてください。'; return; }
 
   enterBtn.disabled = true; enterBtn.textContent = '確認中…';
+  myReal = real;
   const newDbid = myDbid || crypto.randomUUID();
   const ok = await syncUserToServer(newDbid, name);
   enterBtn.disabled = false; enterBtn.textContent = 'はじめる';
@@ -865,19 +896,26 @@ async function handleEnter() {
     myName = name;
     localStorage.setItem(LS.DBID, myDbid);
     localStorage.setItem(LS.NAME, myName);
+    localStorage.setItem('line_chat_real', myReal);
     enterChat();
   }
 }
 
 async function syncUserToServer(dbid, name) {
   myColor = colorForDbid(dbid);
-  const { error } = await supabase.from('users').upsert({
+  const payload = {
     dbid,
     display_name: name,
     avatar_color: myColor,
     last_seen: new Date().toISOString(),
     updated_at: new Date().toISOString(),
-  }, { onConflict: 'dbid' });
+  };
+  if (myReal) payload.real_name = myReal;
+  let { error } = await supabase.from('users').upsert(payload, { onConflict: 'dbid' });
+  if (error && /real_name/.test(error.message || '')) {
+    delete payload.real_name;
+    ({ error } = await supabase.from('users').upsert(payload, { onConflict: 'dbid' }));
+  }
 
   if (error) {
     if (error.code === '23505') {
@@ -941,10 +979,14 @@ function applyDbFullState() {
 }
 
 async function loadUsers() {
-  const { data } = await supabase.from('users').select('dbid, display_name, avatar_color, last_seen');
+  let { data } = await supabase.from('users').select('dbid, display_name, avatar_color, last_seen, real_name');
+  if (!data) ({ data } = await supabase.from('users').select('dbid, display_name, avatar_color, last_seen'));
   if (!data) return;
   for (const u of data) {
-    knownUsers.set(u.dbid, { name: u.display_name, color: u.avatar_color || colorForDbid(u.dbid), online: false });
+    knownUsers.set(u.dbid, {
+      name: u.display_name, real: u.real_name || '',
+      color: u.avatar_color || colorForDbid(u.dbid), online: false,
+    });
   }
 }
 
@@ -1094,6 +1136,8 @@ function onInsert(m) {
     if (m.sender_dbid === myDbid) { lastSentId = m.id; lastSentAt = Date.now(); }
   }
   if (msgById.has(mkey(m.id))) return;
+  lastMsgByChannel.set(ch, m);
+  paintSide();
   msgById.set(mkey(m.id), m);
   msgs.push(m);
   const wasAtBottom = atBottom;
@@ -1177,7 +1221,7 @@ function onPresenceSync() {
     count++;
     const dbid = p.dbid || key;
     const prev = knownUsers.get(dbid) || {};
-    knownUsers.set(dbid, { name: p.name || prev.name || '？', color: p.color || colorForDbid(dbid), online: true, last_read_at: p.last_read_at, channel: p.channel });
+    knownUsers.set(dbid, { name: p.name || prev.name || '？', real: prev.real || '', color: p.color || colorForDbid(dbid), online: true, last_read_at: p.last_read_at, channel: p.channel });
   }
   if (!isDm(currentChannel)) memberTextEl.textContent = `${count}人が参加中`;
   updateReadReceipts();
@@ -2394,7 +2438,10 @@ function openPeople() {
       const av = el('div', (u.name || '?').slice(0, 1).toUpperCase(), 'avatar');
       av.style.background = u.color || colorForDbid(dbid);
       p.appendChild(av);
-      p.appendChild(el('span', u.name + (dbid === myDbid ? '（あなた）' : ''), 'who'));
+      const who = el('div', '', 'who');
+      who.appendChild(el('div', u.name + (dbid === myDbid ? '（あなた）' : '')));
+      if (u.real) who.appendChild(el('div', u.real, 'si-sub'));
+      p.appendChild(who);
       p.appendChild(el('span', isOnline ? '● オンライン' : 'オフライン', 'badge'));
       if (dbid !== myDbid) {
         p.style.cursor = 'pointer';
@@ -2446,6 +2493,61 @@ function openSettings() {
   for (const [key, label] of toggles) {
     sheet.appendChild(switchRow(label, !!prefs[key], (on) => { setPref(key, on); renderAll(); }));
   }
+
+  sheet.appendChild(el('label', '背景画像（URL）'));
+  const bgField = document.createElement('input');
+  bgField.type = 'text';
+  bgField.placeholder = 'https://example.com/wallpaper.jpg';
+  bgField.value = prefs.bgUrl || '';
+  sheet.appendChild(bgField);
+  const bgRow = el('div', '', 'chip-row');
+  bgRow.style.padding = '6px 0 0';
+  const applyBg = el('button', '適用', 'chip');
+  applyBg.addEventListener('click', () => {
+    const v = bgField.value.trim();
+    if (v && !/^https?:\/\//.test(v)) { showToast('http(s) で始まるURLを入れてください'); return; }
+    setPref('bgUrl', v);
+    showToast(v ? '背景を設定しました' : '背景を解除しました');
+  });
+  const clearBg = el('button', '解除', 'chip');
+  clearBg.addEventListener('click', () => { bgField.value = ''; setPref('bgUrl', ''); showToast('背景を解除しました'); });
+  bgRow.append(applyBg, clearBg);
+  sheet.appendChild(bgRow);
+
+  sheet.appendChild(el('label', '背景の暗さ'));
+  sheet.appendChild(segmented(
+    [[0, 'なし'], [0.25, '少し暗く'], [0.45, '暗く'], [0.65, 'かなり暗く']].map(([v, l]) => [String(v), l]),
+    String(prefs.bgDim || 0),
+    (v) => setPref('bgDim', Number(v))
+  ));
+
+  sheet.appendChild(el('label', '書体'));
+  sheet.appendChild(segmented(
+    [['default', '標準'], ['round', '丸ゴシック'], ['mincho', '明朝'], ['mono', '等幅']],
+    prefs.font || 'default',
+    (v) => setPref('font', v)
+  ));
+
+  sheet.appendChild(el('label', 'ふきだしの角'));
+  sheet.appendChild(segmented(
+    [['4', '角ばる'], ['10', '控えめ'], ['16', '標準'], ['22', '丸い']],
+    String(prefs.radius ?? 16),
+    (v) => setPref('radius', Number(v))
+  ));
+
+  sheet.appendChild(el('label', '自分のふきだしの色'));
+  const mineRow = el('div', '', 'chip-row');
+  mineRow.style.padding = '0';
+  for (const [name, hex] of [['標準', ''], ['空', '#9fd8ff'], ['桃', '#ffc2d6'], ['黄', '#ffe08a'], ['紫', '#d4c6ff'], ['灰', '#dfe4e8']]) {
+    const c = el('button', name, 'chip' + ((prefs.mineColor || '') === hex ? ' on' : ''));
+    c.addEventListener('click', () => {
+      setPref('mineColor', hex);
+      mineRow.querySelectorAll('.chip').forEach((n) => n.classList.remove('on'));
+      c.classList.add('on');
+    });
+    mineRow.appendChild(c);
+  }
+  sheet.appendChild(mineRow);
 
   sheet.appendChild(el('label', 'アクセントカラー'));
   const colorRow = el('div', '', 'chip-row');
@@ -2515,6 +2617,23 @@ function openSettings() {
   });
   idBox.appendChild(copyBtn);
   sheet.appendChild(idBox);
+
+  sheet.appendChild(el('label', '本名（メンバー一覧に表示）'));
+  const realField = document.createElement('input');
+  realField.type = 'text'; realField.maxLength = 30; realField.value = myReal || '';
+  sheet.appendChild(realField);
+  const realBtn = el('button', '本名を保存', 'row-btn ghost');
+  realBtn.addEventListener('click', async () => {
+    const v = realField.value.trim();
+    const { error } = await supabase.from('users').update({ real_name: v }).eq('dbid', myDbid);
+    if (error) { showToast('保存できませんでした: ' + error.message); return; }
+    myReal = v;
+    localStorage.setItem('line_chat_real', v);
+    const me = knownUsers.get(myDbid) || {};
+    knownUsers.set(myDbid, { ...me, real: v });
+    showToast('本名を保存しました');
+  });
+  sheet.appendChild(realBtn);
 
   sheet.appendChild(el('label', '表示名'));
   const nameField = document.createElement('input');
@@ -2729,7 +2848,7 @@ function paintSide() {
     list.appendChild(sideItem({
       key: ch, initial: (u.name || '?').slice(0, 1).toUpperCase(),
       color: u.color || colorForDbid(dbid), name: u.name,
-      sub: previewOfChannel(ch) || (u.online ? 'オンライン' : 'オフライン'),
+      sub: previewOfChannel(ch) || u.real || (u.online ? 'オンライン' : 'オフライン'),
       online: u.online,
     }));
   }
@@ -2786,9 +2905,6 @@ async function switchChannel(ch) {
 
 $('#side-settings').addEventListener('click', openSettings);
 $('#back-btn').addEventListener('click', () => document.body.classList.remove('show-talk'));
-document.querySelectorAll('.mtab').forEach((b) => b.addEventListener('click', () => {
-  document.body.classList.toggle('show-talk', b.dataset.tab === 'talk');
-}));
 
 (function setupSplitter() {
   const sp = $('#splitter');
