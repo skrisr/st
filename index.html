@@ -906,7 +906,7 @@ let pinnedMsg = null;
 let currentChannel = 'main';
 const unreadByChannel = new Map();
 const lastMsgByChannel = new Map();
-let reads = safeParse(localStorage.getItem('line_chat_reads')) || {};
+let reads = safeParse(localStorage.getItem('line_chat_reads'), {});
 
 function dmKey(a, b) { return 'dm:' + [String(a), String(b)].sort().join(':'); }
 function isDm(ch) { return String(ch).startsWith('dm:'); }
@@ -940,8 +940,13 @@ const PREF_DEFAULTS = {
   shortLinks: false, mentionOnly: false, muteUntil: 0, accent: '',
   jumbo: true, bgUrl: '', bgDim: 0, font: 'default', radius: 16, mineColor: '',
 };
-let prefs = { ...PREF_DEFAULTS, ...safeParse(localStorage.getItem(PREF_KEY)) };
-function safeParse(v) { try { return JSON.parse(v) || {}; } catch (_) { return {}; } }
+let prefs = { ...PREF_DEFAULTS, ...safeParse(localStorage.getItem(PREF_KEY), {}) };
+function safeParse(v, fallback = {}) {
+  try {
+    const parsed = JSON.parse(v);
+    return (parsed === null || parsed === undefined) ? fallback : parsed;
+  } catch (_) { return fallback; }
+}
 function pref(k) { return prefs[k]; }
 function setPref(k, v) { prefs[k] = v; localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); applyPrefs(); }
 const FONT_STACKS = {
@@ -977,11 +982,11 @@ function applyPrefs() {
   }
 }
 
-let bookmarks = new Set(safeParse(localStorage.getItem('line_chat_bookmarks')) || []);
+let bookmarks = new Set(safeParse(localStorage.getItem('line_chat_bookmarks'), []));
 function saveBookmarks() { localStorage.setItem('line_chat_bookmarks', JSON.stringify([...bookmarks])); }
-let snippets = safeParse(localStorage.getItem('line_chat_snippets')) || [];
+let snippets = safeParse(localStorage.getItem('line_chat_snippets'), []);
 function saveSnippets() { localStorage.setItem('line_chat_snippets', JSON.stringify(snippets)); }
-let searchHistory = safeParse(localStorage.getItem('line_chat_searches')) || [];
+let searchHistory = safeParse(localStorage.getItem('line_chat_searches'), []);
 let lastSentId = null, lastSentAt = 0;
 let searchFilterMine = false, searchFilterImage = false;
 
