@@ -612,7 +612,7 @@
       <input id="name-input" type="text" maxlength="20" placeholder="表示名（トークに出る名前）" autocomplete="off">
       <button id="enter-btn">はじめる</button>
       <div class="err" id="gate-err"></div>
-      <div class="hint">本名はメンバー一覧にだけ出ます。誰が誰か分かるようにするためのものです。<br>表示名は他の人と重複できません。</div>
+      <div class="hint"><a href="#" id="gate-debug" style="color:inherit">うまく入れないときはこちら</a><br>本名はメンバー一覧にだけ出ます。誰が誰か分かるようにするためのものです。<br>表示名は他の人と重複できません。</div>
     </div>
   </div>
 
@@ -803,8 +803,8 @@ const rawSupabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 function watchThenable(label, obj) {
   if (!obj || typeof obj !== 'object') return obj;
   return new Proxy(obj, {
-    get(target, prop, recv) {
-      const v = Reflect.get(target, prop, recv);
+    get(target, prop) {
+      const v = Reflect.get(target, prop);
       if (prop === 'then' && typeof v === 'function') {
         return (onOk, onNg) => v.call(target, (res) => {
           if (res && res.error) DBG.err(label, res.error.message || res.error);
@@ -820,15 +820,16 @@ function watchThenable(label, obj) {
   });
 }
 
-const supabase = new Proxy(rawSupabase, {
-  get(target, prop, recv) {
-    const v = Reflect.get(target, prop, recv);
+const SAFE_MODE = localStorage.getItem('line_chat_safemode') === '1';
+const supabase = SAFE_MODE ? rawSupabase : new Proxy(rawSupabase, {
+  get(target, prop) {
+    const v = Reflect.get(target, prop);
     if (prop === 'from') return (table) => watchThenable('db:' + table, v.call(target, table));
     if (prop === 'rpc') return (name, ...a) => watchThenable('rpc:' + name, v.call(target, name, ...a));
     if (prop === 'storage') {
       return new Proxy(v, {
-        get(st, p2, r2) {
-          const f = Reflect.get(st, p2, r2);
+        get(st, p2) {
+          const f = Reflect.get(st, p2);
           if (p2 === 'from') return (b) => watchThenable('storage:' + b, f.call(st, b));
           return typeof f === 'function' ? f.bind(st) : f;
         },
@@ -837,6 +838,7 @@ const supabase = new Proxy(rawSupabase, {
     return typeof v === 'function' ? v.bind(target) : v;
   },
 });
+if (SAFE_MODE) DBG.warn('boot', 'セーフモード: デバッグ計装を無効化しています');
 
 const LS = {
   DBID: 'line_chat_dbid',
@@ -1049,6 +1051,13 @@ function showGate() {
 }
 
 enterBtn.addEventListener('click', handleEnter);
+$('#gate-debug').addEventListener('click', (e) => {
+  e.preventDefault();
+  DBG.on = true;
+  localStorage.setItem('line_chat_debug', '1');
+  DBG.info('env', { ua: navigator.userAgent, online: navigator.onLine, safeMode: SAFE_MODE });
+  openDebugPanel();
+});
 nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') handleEnter(); });
 
 async function handleEnter() {
@@ -1062,8 +1071,16 @@ async function handleEnter() {
   enterBtn.disabled = true; enterBtn.textContent = '確認中…';
   myReal = real;
   const newDbid = myDbid || crypto.randomUUID();
-  const ok = await syncUserToServer(newDbid, name);
-  enterBtn.disabled = false; enterBtn.textContent = 'はじめる';
+  let ok = false;
+  try {
+    ok = await syncUserToServer(newDbid, name);
+  } catch (e) {
+    DBG.err('handleEnter', e);
+    gateErr.textContent = '入室処理でエラー: ' + (e.message || e);
+  } finally {
+    enterBtn.disabled = false;
+    enterBtn.textContent = 'はじめる';
+  }
 
   if (ok) {
     myDbid = newDbid;
@@ -1076,6 +1093,16 @@ async function handleEnter() {
 }
 
 async function syncUserToServer(dbid, name) {
+  try {
+    return await syncUserToServerInner(dbid, name);
+  } catch (e) {
+    DBG.err('syncUserToServer', e);
+    gateErr.textContent = '接続でエラー: ' + (e.message || e);
+    return false;
+  }
+}
+
+async function syncUserToServerInner(dbid, name) {
   myColor = colorForDbid(dbid);
   const payload = {
     dbid,
