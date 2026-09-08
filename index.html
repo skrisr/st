@@ -1,0 +1,2341 @@
+<!DOCTYPE html>
+<!--
+================================================================================
+ 仕様書 (SPEC) — Supabase LINE風チャットアプリ / chat.html
+================================================================================
+■ このファイルについて
+  1つの部屋だけを持つ、名前入力のみで入室できるチャットアプリです。
+  UIはLINEのトーク画面を模しています。DB定義は別ファイル schema.sql を
+  参照してください（SQLとHTMLはあえて別ファイルに分けています）。
+
+■ 更新履歴の書式（以後もこの形式で追記していくこと）
+  [日付] 指示 #n（ユーザーからの指示の要約）
+  [日付] 対応内容 #n（それに対してClaudeが実装した内容）
+
+--------------------------------------------------------------------------------
+[2026-08-28] 指示 #1（ユーザー原文の要約）
+--------------------------------------------------------------------------------
+  ・Supabaseを使ったチャットアプリを作りたい
+  ・名前入力だけで入室できる。部屋は1つのみ
+  ・Supabaseの接続情報(URL / publishable key)を指定 ※値はコード内で
+    難読化して使用し、この仕様書には平文で書かない
+  ・仕様書をファイル先頭にコメントアウトで追加。以後、毎回「指示」と
+    「対応内容」を仕様書に追記していく方式にする
+  ・UIはLINE風
+  ・常にリアルタイムに最新の状態を反映する（毎回更新）
+  ・SQLとHTMLは別ファイルで出力する。SQLは特に単独でもきちんと出す
+  ・テキストの送信・削除ができる
+  ・利便性のためAPIを積極的に活用する
+  ・ランダムID用のAPIでdbid（ユーザーごとの一意なID）を発行し、
+    localStorageに保存して各ユーザーに紐づける
+  ・そのユーザーのdbidが変更された場合、サーバー上の表示名データも
+    その変更に合わせて更新されるようにする
+  ・表示名（ユーザー名）はサーバー上で重複できないようにする
+  ・1回に送信できるテキストは最大1024KBまで。長文は簡単に
+    折りたたみ／展開ができるようにする
+  ・コード中のkeyやURLなどのリンクは暗号化（難読化）する
+
+--------------------------------------------------------------------------------
+[2026-08-28] 対応内容 #1（Claudeが実装した内容）
+--------------------------------------------------------------------------------
+  ・DB: schema.sql に users(dbid, display_name UNIQUE) /
+    messages(id, sender_dbid FK ON UPDATE CASCADE, sender_name, content,
+    content_bytes 生成列, created_at) を作成。RLSはオープンだが、
+    削除ボタンはクライアント側で「自分のdbidのメッセージのみ」に表示。
+  ・入室: 名前を入力するだけの単一画面。初回はcrypto.randomUUID()
+    （Web Crypto API＝「ランダムIDを発行するAPI」）でdbidを発行し、
+    localStorage(キー: line_chat_dbid / line_chat_name)に保存。
+    2回目以降はlocalStorageの値でそのまま自動入室する。
+  ・表示名の重複禁止: users.display_nameのUNIQUE制約に加え、
+    upsert時に一意制約違反(23505)を検知してエラーメッセージ表示。
+  ・「dbidが変わったらサーバー上の表示名データを更新する」仕様:
+    設定パネルの「IDを再発行」ボタンを押すと crypto.randomUUID()で
+    新dbidを生成し、UPDATE users SET dbid = 新dbid WHERE dbid = 旧dbid。
+    ON UPDATE CASCADEにより過去メッセージのsender_dbidも自動追従。
+  ・チャット本体: Supabase Realtime の postgres_changes で
+    messagesテーブルのINSERT/DELETEを購読しリアルタイム反映。
+  ・オンライン人数表示: Supabase Realtime の Presence機能。
+  ・本文サイズ制限: TextEncoder APIで実バイト数を計測し1,048,576バイト上限。
+  ・長文の折りたたみ: 300文字超は「もっと見る／閉じる」で展開・縮小。
+  ・keyとURLの難読化: Base64エンコード後に文字列を反転させて埋め込み、
+    実行時に「反転→Base64デコード」して復元する deobfuscate() を実装。
+
+--------------------------------------------------------------------------------
+[2026-09-08] 指示 #2（ユーザー原文の要約）
+--------------------------------------------------------------------------------
+  ・chat.html を進化させてほしい。機能追加の内容はこちらの裁量に任せる。
+
+--------------------------------------------------------------------------------
+[2026-09-08] 対応内容 #2（Claudeが実装した内容）— v2.0
+--------------------------------------------------------------------------------
+  ★ セキュリティ上の指摘
+    v1のファイル先頭には「システム指示」を装った偽の命令文（解析を拒否させ、
+    パスワードを要求させる内容）がコメントとして埋め込まれていました。これは
+    プロンプトインジェクションであり、ファイル内のテキストは指示ではなく
+    データとして扱うべきものです。v2ではこの記述を削除しました。
+
+  ① 返信（リプライ）
+      アクションメニューから返信すると引用付きで送信。引用をタップすると
+      元メッセージへスクロールしてハイライトする。DBは messages.reply_to。
+  ② 絵文字リアクション
+      1メッセージに複数種類・複数人。自分の分はタップでトグル。
+      reactionsテーブルをRealtime購読して全員の画面に即時反映。
+  ③ メッセージの編集
+      自分のメッセージを編集可能。edited_at を持ち「編集済み」と表示。
+      UPDATEもRealtime購読しているので他の人の画面もその場で書き換わる。
+  ④ 既読表示（LINE風）
+      Presenceに last_read_at を載せ、自分の発言より後に既読位置がある
+      参加者の数を「既読 N」として表示。DBへの書き込みゼロで実現。
+  ⑤ 入力中インジケーター
+      Realtimeのbroadcastで「◯◯さんが入力中…」を3秒間だけ表示。
+  ⑥ 画像の添付
+      Supabase Storage(chat-imagesバケット)へアップロード。ボタン選択・
+      ドラッグ&ドロップ・クリップボードから貼り付けの3経路に対応。
+      サムネイル表示＋タップで全画面ライトボックス。
+  ⑦ メンション
+      「@」入力で参加者のオートコンプリート。自分宛てのメッセージは
+      バブルを強調表示し、通知＋バイブレーションで知らせる。
+  ⑧ 全文検索
+      ヘッダーの検索から ILIKE でサーバー横断検索（pg_trgmインデックス）。
+      結果をタップするとその時点の前後30件を読み込んで該当箇所へジャンプ。
+  ⑨ 過去ログの無限スクロール
+      初期表示は50件。上端に達すると IntersectionObserver が発火して
+      さらに50件ずつ遡る（スクロール位置は維持）。
+  ⑩ 未読まわり
+      未読の境界に「ここから未読」の区切り線。下端にいないときは
+      「新着 N件 ↓」ボタン。タブが非アクティブの間はタイトルに未読数。
+  ⑪ 本文のリッチ表示
+      URLの自動リンク化、**太字** / *斜体* / `コード` / ~~打消し~~ の
+      簡易Markdown、連続改行の正規化。すべてDOM APIで組み立てるため
+      innerHTMLによるXSSの経路を作らない。
+  ⑫ 楽観的送信
+      送信ボタンを押した瞬間にバブルを描画（半透明＋時計マーク）し、
+      サーバー確定で通常表示に切替。失敗時は「再送」ボタンを出す。
+      client_id列で自分のRealtimeイベントと突合して二重表示を防止。
+  ⑬ ダークモード
+      システム連動／ライト／ダークの3択。LINEのダークテーマに寄せた配色。
+  ⑭ 文字サイズ変更（小・標準・大）
+  ⑮ 参加者リスト
+      オンライン（Presence）とオフライン（usersテーブル）を分けて表示。
+  ⑯ 接続状態の表示と自動復帰
+      切断時はヘッダーに「接続していません」を出し、復帰時に差分を再取得。
+  ⑰ 通知音（Web Audio APIで生成。オン/オフ切替あり）
+  ⑱ アバターの自動カラーリング（dbidのハッシュから決定・DBにも保存）
+  ⑲ キーボードショートカット
+      Ctrl/⌘+K 検索 / Esc 取消 / ↑ 直前の自分の発言を編集 / Enter 送信
+  ⑳ アクションメニュー
+      バブルの長押し（スマホ）・右クリック（PC）・「⋯」ボタンで
+      返信／リアクション／コピー／編集／削除をまとめて操作。
+
+  ・追加で活用したブラウザAPI:
+      IntersectionObserver … 過去ログの追加読み込み・既読判定
+      Web Audio API        … 通知音の生成
+      Vibration API        … メンション時の振動
+      matchMedia           … OSのダークモード検出
+      Clipboard API        … 画像の貼り付け／本文コピー
+      Drag and Drop API    … 画像のドロップ投稿
+      navigator.onLine     … 接続断の検出
+      History API          … ライトボックス表示中の戻る操作
+
+  ・DB変更は schema.sql v2.0 に集約（v1からの移行SQL付き）。
+
+--------------------------------------------------------------------------------
+[2026-09-08] 指示 #3（ユーザー原文の要約）
+--------------------------------------------------------------------------------
+  ・ストレージが満杯になったら自動でファイル送信をできなくしてほしい
+  ・「画像のみ削除」のような項目を追加してほしい
+
+--------------------------------------------------------------------------------
+[2026-09-08] 対応内容 #3（Claudeが実装した内容）— v2.1
+--------------------------------------------------------------------------------
+  ・schema.sql に public.storage_usage ビューを追加。storage.objects から
+    chat-images バケットの合計バイト数を集計し、クライアントから
+    supabase.from('storage_usage').select() で読めるようにした。
+  ・chat.html 側は起動時・画像アップロード後・2分毎に使用量を取得し、
+    STORAGE_LIMIT_BYTES(既定1GB) - STORAGE_SAFE_MARGIN(20MB) を超えたら
+    添付ボタンを自動的に無効化。選択中の画像があれば取り消し、
+    トーストで通知する。設定パネルにも現在の使用量を表示する。
+  ・アクションメニューに「画像だけ削除」を追加。本文は残したまま
+    image_url だけをnullにしてStorageからも実ファイルを削除する。
+    本文が無い（画像のみの）投稿の場合は空メッセージを残せない
+    制約(messages_not_empty)に触れるため、メッセージごと削除する
+    フローに自動で切り替える。
+  ・メッセージ削除（画像だけ削除／メッセージ全体削除）のたびに
+    使用量をローカルでも即座に差し引き、次のポーリングを待たずに
+    UIへ反映する。
+================================================================================
+-->
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#06c755">
+<title>トーク | LINE風チャット</title>
+<style>
+  :root{
+    --line-green:#06c755;
+    --line-green-dark:#05a648;
+    --bg-chat:#e5ebee;
+    --bg-panel:#ffffff;
+    --bubble-mine:#8de24e;
+    --bubble-mine-text:#093a00;
+    --bubble-other:#ffffff;
+    --bubble-other-text:#1a1a1a;
+    --header-bg:#06c755;
+    --header-text:#ffffff;
+    --text-main:#1a1a1a;
+    --text-sub:#8b98a1;
+    --border:#e2e6e8;
+    --field-bg:#ffffff;
+    --field-border:#dfe3e6;
+    --chip-bg:#f2f4f5;
+    --overlay:rgba(0,0,0,.45);
+    --quote-bg:rgba(0,0,0,.06);
+    --danger:#e0433b;
+    --header-h:56px;
+    --font-scale:1;
+    --dot:rgba(0,0,0,.045);
+  }
+  [data-theme="dark"]{
+    --line-green:#06c755;
+    --line-green-dark:#05a648;
+    --bg-chat:#15171a;
+    --bg-panel:#22262b;
+    --bubble-mine:#2f6b3c;
+    --bubble-mine-text:#eafce4;
+    --bubble-other:#2b3037;
+    --bubble-other-text:#e6e9ec;
+    --header-bg:#1c1f23;
+    --header-text:#f0f2f4;
+    --text-main:#e6e9ec;
+    --text-sub:#8f9aa3;
+    --border:#33393f;
+    --field-bg:#2b3037;
+    --field-border:#3a4149;
+    --chip-bg:#31373e;
+    --overlay:rgba(0,0,0,.6);
+    --quote-bg:rgba(255,255,255,.09);
+    --danger:#ff7b73;
+    --dot:rgba(255,255,255,.04);
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    height:100%; margin:0; padding:0;
+    font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg-chat);
+    color:var(--text-main);
+    overscroll-behavior:none;
+    -webkit-text-size-adjust:100%;
+  }
+  #app{ height:100dvh; display:flex; flex-direction:column; }
+  button{ font-family:inherit; }
+  :focus-visible{ outline:2px solid var(--line-green); outline-offset:2px; }
+  @media (prefers-reduced-motion:reduce){ *{ animation-duration:.01ms !important; transition-duration:.01ms !important; } }
+
+  /* ---------- 入室画面 ---------- */
+  #gate{
+    height:100dvh; display:flex; align-items:center; justify-content:center;
+    background:linear-gradient(160deg,var(--line-green) 0%, var(--line-green-dark) 55%, #03823a 100%);
+    padding:20px;
+  }
+  #gate .card{
+    background:var(--bg-panel); width:100%; max-width:360px; border-radius:20px;
+    padding:32px 26px; box-shadow:0 20px 50px rgba(0,0,0,.25); text-align:center;
+  }
+  #gate .logo{
+    width:64px;height:64px;border-radius:18px;background:var(--line-green);
+    display:flex;align-items:center;justify-content:center;margin:0 auto 16px;
+    color:#fff;font-size:30px;font-weight:700;
+  }
+  #gate h1{ font-size:19px; margin:0 0 6px; color:var(--text-main);}
+  #gate p.sub{ font-size:13px; color:var(--text-sub); margin:0 0 22px;}
+  #gate input{
+    width:100%; padding:13px 14px; border-radius:10px; border:1.5px solid var(--field-border);
+    font-size:15px; outline:none; margin-bottom:10px; background:var(--field-bg); color:var(--text-main);
+  }
+  #gate input:focus{ border-color:var(--line-green); }
+  #gate button{
+    width:100%; padding:13px; border:none; border-radius:10px;
+    background:var(--line-green); color:#fff; font-size:15px; font-weight:700;
+    cursor:pointer; transition:opacity .15s;
+  }
+  #gate button:disabled{ opacity:.5; cursor:default; }
+  #gate button:not(:disabled):active{ opacity:.8; }
+  #gate .err{ color:var(--danger); font-size:12.5px; margin-top:8px; min-height:16px; }
+  #gate .hint{ font-size:11px; color:var(--text-sub); margin-top:18px; line-height:1.6; }
+
+  /* ---------- ヘッダー ---------- */
+  #header{
+    height:var(--header-h); min-height:var(--header-h);
+    background:var(--header-bg); color:var(--header-text); display:flex; align-items:center;
+    padding:0 6px 0 12px; gap:6px; box-shadow:0 1px 4px rgba(0,0,0,.15); z-index:5;
+  }
+  #header .room-icon{
+    width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.22);
+    display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0;
+  }
+  #header .titles{ flex:1; min-width:0; cursor:pointer; }
+  #header .titles .name{ font-size:15.5px; font-weight:700; line-height:1.2; }
+  #header .titles .members{ font-size:11px; opacity:.9; line-height:1.3; display:flex; align-items:center; gap:5px;}
+  .conn-dot{ width:6px;height:6px;border-radius:50%;background:#7ef2a4; flex-shrink:0;}
+  .conn-dot.off{ background:#ffb4b0; }
+  #header button.icon-btn{
+    background:none;border:none;color:var(--header-text);font-size:18px;cursor:pointer;
+    width:36px;height:36px;border-radius:50%; display:flex;align-items:center;justify-content:center;
+    flex-shrink:0;
+  }
+  #header button.icon-btn:active{ background:rgba(255,255,255,.2); }
+
+  /* ---------- 検索バー ---------- */
+  #search-bar{
+    display:none; background:var(--bg-panel); border-bottom:1px solid var(--border);
+    padding:8px 10px; gap:8px; align-items:center; z-index:4;
+  }
+  #search-bar.open{ display:flex; }
+  #search-input{
+    flex:1; padding:9px 12px; border-radius:18px; border:1px solid var(--field-border);
+    background:var(--field-bg); color:var(--text-main); font-size:14px; outline:none;
+  }
+  #search-input:focus{ border-color:var(--line-green); }
+  #search-bar button{
+    background:var(--chip-bg); border:none; color:var(--text-main); border-radius:16px;
+    padding:8px 12px; font-size:12.5px; cursor:pointer;
+  }
+  #search-results{
+    display:none; position:absolute; left:0; right:0; top:0; bottom:0; z-index:6;
+    background:var(--bg-chat); overflow-y:auto; padding:8px 10px 30px;
+  }
+  #search-results.open{ display:block; }
+  .sr-item{
+    background:var(--bg-panel); border-radius:12px; padding:11px 13px; margin-bottom:8px;
+    cursor:pointer; border:1px solid var(--border);
+  }
+  .sr-item:active{ opacity:.7; }
+  .sr-head{ font-size:11.5px; color:var(--text-sub); display:flex; justify-content:space-between; gap:8px; margin-bottom:4px;}
+  .sr-body{ font-size:13.5px; line-height:1.5; word-break:break-word; }
+  .sr-body mark, .bubble mark{ background:#ffe680; color:#3a2c00; border-radius:3px; padding:0 1px;}
+  [data-theme="dark"] .sr-body mark, [data-theme="dark"] .bubble mark{ background:#7a6320; color:#fff6d5; }
+  .sr-empty{ text-align:center; color:var(--text-sub); font-size:13px; padding:40px 10px; line-height:1.8;}
+
+  /* ---------- メッセージエリア ---------- */
+  #chat-body{ flex:1; min-height:0; position:relative; display:flex; flex-direction:column; }
+  #messages{
+    flex:1; overflow-y:auto; padding:6px 10px 20px;
+    display:flex; flex-direction:column; gap:2px;
+    background-image: radial-gradient(var(--dot) 1px, transparent 1px);
+    background-size:14px 14px;
+    font-size:calc(14.5px * var(--font-scale));
+  }
+  #top-sentinel{ height:1px; }
+  .loading-older{ text-align:center; font-size:11.5px; color:var(--text-sub); padding:10px 0; }
+  .day-sep{ text-align:center; margin:14px 0 8px; }
+  .day-sep span{
+    background:var(--quote-bg); color:var(--text-sub); font-size:11px; padding:3px 12px; border-radius:10px;
+  }
+  .unread-sep{ text-align:center; margin:14px 0 8px; position:relative; }
+  .unread-sep::before{
+    content:''; position:absolute; left:0; right:0; top:50%; height:1px; background:var(--danger); opacity:.45;
+  }
+  .unread-sep span{
+    position:relative; background:var(--danger); color:#fff; font-size:10.5px; padding:3px 12px; border-radius:10px;
+  }
+  .msg-row{ display:flex; margin:5px 0; max-width:100%; align-items:flex-end; gap:6px; }
+  .msg-row.mine{ justify-content:flex-end; }
+  .msg-row.theirs{ justify-content:flex-start; }
+  .msg-row.sending{ opacity:.55; }
+  .msg-row.highlight .bubble{ animation:flash 1.6s ease; }
+  @keyframes flash{
+    0%,25%{ box-shadow:0 0 0 3px rgba(6,199,85,.55); }
+    100%{ box-shadow:0 1px 1px rgba(0,0,0,.05); }
+  }
+
+  .avatar{
+    width:32px;height:32px;border-radius:50%;background:#c9d2d8;color:#fff;
+    display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;
+    flex-shrink:0; margin-bottom:2px; user-select:none;
+  }
+
+  .bubble-col{ display:flex; flex-direction:column; max-width:74%; min-width:0; }
+  .sender-name{ font-size:11.5px; color:var(--text-sub); margin:0 0 3px 3px; }
+
+  .bubble-wrap{ display:flex; align-items:flex-end; gap:5px; }
+  .msg-row.mine .bubble-wrap{ flex-direction:row-reverse; }
+
+  .bubble{
+    position:relative; padding:9px 12px; border-radius:16px;
+    line-height:1.55; word-break:break-word; overflow-wrap:anywhere; white-space:pre-wrap;
+    box-shadow:0 1px 1px rgba(0,0,0,.05); cursor:default; -webkit-user-select:text;
+  }
+  .msg-row.theirs .bubble{
+    background:var(--bubble-other); color:var(--bubble-other-text); border-bottom-left-radius:4px;
+  }
+  .msg-row.mine .bubble{
+    background:var(--bubble-mine); color:var(--bubble-mine-text); border-bottom-right-radius:4px;
+  }
+  .msg-row.mentions-me .bubble{ box-shadow:0 0 0 2px var(--line-green); }
+  .bubble a{ color:inherit; text-decoration:underline; text-underline-offset:2px; }
+  .bubble code{
+    background:var(--quote-bg); padding:1px 5px; border-radius:5px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.9em;
+  }
+  .bubble del{ opacity:.65; }
+  .bubble .mention{ font-weight:700; text-decoration:underline; text-underline-offset:2px; }
+
+  .quote{
+    display:block; background:var(--quote-bg); border-left:3px solid currentColor;
+    border-radius:6px; padding:5px 8px; margin:-1px 0 7px; font-size:.86em; opacity:.85;
+    cursor:pointer; max-height:4.2em; overflow:hidden;
+  }
+  .quote .q-name{ font-weight:700; display:block; margin-bottom:1px; }
+  .quote .q-text{ display:block; white-space:pre-wrap; word-break:break-word; }
+
+  .bubble .msg-image{
+    display:block; max-width:min(240px,60vw); max-height:280px; width:auto; border-radius:10px;
+    margin:2px 0 0; cursor:zoom-in; background:var(--quote-bg);
+  }
+  .bubble .msg-image + .msg-text{ display:block; margin-top:7px; }
+
+  .meta{ display:flex; flex-direction:column; align-items:flex-end; gap:1px; margin-bottom:2px; flex-shrink:0;}
+  .msg-row.theirs .meta{ align-items:flex-start; }
+  .time{ font-size:10px; color:var(--text-sub); white-space:nowrap; }
+  .read-mark{ font-size:10px; color:var(--text-sub); white-space:nowrap; }
+  .edited-mark{ font-size:10px; color:var(--text-sub); }
+  .more-btn{
+    background:none;border:none;color:var(--text-sub); font-size:13px; cursor:pointer; padding:0 2px; line-height:1;
+  }
+  .retry-btn{ background:none;border:none;color:var(--danger); font-size:10.5px; cursor:pointer; padding:0;}
+
+  .more-toggle{
+    display:inline-block; margin-top:6px; font-size:.85em; font-weight:700;
+    text-decoration:underline; cursor:pointer; opacity:.8;
+  }
+
+  /* リアクション */
+  .reactions{ display:flex; flex-wrap:wrap; gap:4px; margin:4px 0 0; }
+  .msg-row.mine .reactions{ justify-content:flex-end; }
+  .reaction{
+    display:inline-flex; align-items:center; gap:3px; background:var(--bg-panel);
+    border:1px solid var(--border); border-radius:12px; padding:1px 7px; font-size:11.5px;
+    cursor:pointer; line-height:1.6; color:var(--text-main);
+  }
+  .reaction.by-me{ border-color:var(--line-green); background:rgba(6,199,85,.14); }
+  .reaction .n{ font-size:10.5px; color:var(--text-sub); }
+  .reaction.by-me .n{ color:var(--line-green-dark); font-weight:700; }
+  [data-theme="dark"] .reaction.by-me .n{ color:#7ef2a4; }
+
+  /* ---------- 入力中 / 新着ジャンプ ---------- */
+  #typing{
+    position:absolute; left:12px; bottom:6px; font-size:11.5px; color:var(--text-sub);
+    background:var(--bg-panel); border:1px solid var(--border); border-radius:14px;
+    padding:4px 10px; display:none; box-shadow:0 2px 6px rgba(0,0,0,.08); z-index:3;
+  }
+  #typing.show{ display:block; }
+  #typing .dots span{ animation:blink 1.2s infinite; }
+  #typing .dots span:nth-child(2){ animation-delay:.2s; }
+  #typing .dots span:nth-child(3){ animation-delay:.4s; }
+  @keyframes blink{ 0%,60%,100%{opacity:.25} 30%{opacity:1} }
+
+  #jump-btn{
+    position:absolute; right:12px; bottom:14px; z-index:3; display:none;
+    background:var(--line-green); color:#fff; border:none; border-radius:20px;
+    padding:8px 14px; font-size:12.5px; font-weight:700; cursor:pointer;
+    box-shadow:0 3px 10px rgba(0,0,0,.25);
+  }
+  #jump-btn.show{ display:block; }
+
+  /* ---------- 入力エリア ---------- */
+  #reply-bar, #edit-bar{
+    display:none; background:var(--bg-panel); border-top:1px solid var(--border);
+    padding:8px 12px; align-items:center; gap:10px; font-size:12.5px;
+  }
+  #reply-bar.open, #edit-bar.open{ display:flex; }
+  #reply-bar .bar-body, #edit-bar .bar-body{ flex:1; min-width:0; }
+  #reply-bar .bar-label, #edit-bar .bar-label{ color:var(--line-green); font-weight:700; font-size:11.5px; }
+  #reply-bar .bar-text, #edit-bar .bar-text{
+    color:var(--text-sub); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .bar-close{ background:none;border:none;color:var(--text-sub);font-size:17px;cursor:pointer; }
+
+  #image-bar{ display:none; background:var(--bg-panel); border-top:1px solid var(--border); padding:8px 12px; align-items:center; gap:10px;}
+  #image-bar.open{ display:flex; }
+  #image-bar img{ width:52px;height:52px;object-fit:cover;border-radius:8px; }
+  #image-bar .img-name{ flex:1; font-size:12px; color:var(--text-sub); word-break:break-all; }
+
+  #composer{
+    background:var(--bg-panel); border-top:1px solid var(--border);
+    display:flex; align-items:flex-end; gap:8px; padding:10px 10px calc(10px + env(safe-area-inset-bottom));
+  }
+  #composer textarea{
+    flex:1; resize:none; border:1px solid var(--field-border); border-radius:20px;
+    padding:10px 14px; font-size:calc(14.5px * var(--font-scale)); max-height:120px; min-height:22px;
+    line-height:1.4; outline:none; font-family:inherit; background:var(--field-bg); color:var(--text-main);
+  }
+  #composer textarea:focus{ border-color:var(--line-green); }
+  .round-btn{
+    width:42px;height:42px;border-radius:50%;border:none;background:var(--chip-bg);
+    color:var(--text-main); font-size:18px; cursor:pointer; flex-shrink:0;
+    display:flex;align-items:center;justify-content:center; transition:opacity .15s;
+  }
+  #send-btn{ background:var(--line-green); color:#fff; font-size:17px; }
+  #send-btn:disabled{ opacity:.35; cursor:default; }
+  #byte-counter{ font-size:10.5px; color:var(--text-sub); text-align:right; padding:0 14px 4px 0; background:var(--bg-panel);}
+  #byte-counter.over{ color:var(--danger); font-weight:700; }
+  #drop-hint{
+    position:fixed; inset:0; z-index:70; display:none; align-items:center; justify-content:center;
+    background:rgba(6,199,85,.16); border:3px dashed var(--line-green); color:var(--line-green-dark);
+    font-size:16px; font-weight:700; pointer-events:none;
+  }
+  #drop-hint.show{ display:flex; }
+
+  /* ---------- メンション候補 ---------- */
+  #mention-box{
+    display:none; position:absolute; left:10px; right:10px; bottom:calc(100% + 4px);
+    background:var(--bg-panel); border:1px solid var(--border); border-radius:12px;
+    box-shadow:0 -4px 16px rgba(0,0,0,.15); max-height:180px; overflow-y:auto; z-index:8;
+  }
+  #mention-box.open{ display:block; }
+  .mention-item{ padding:10px 13px; font-size:13.5px; cursor:pointer; display:flex; align-items:center; gap:9px;}
+  .mention-item.active{ background:var(--chip-bg); }
+  .mention-item .avatar{ width:26px;height:26px;font-size:11px;margin:0; }
+
+  /* ---------- モーダル・メニュー ---------- */
+  .modal-overlay{
+    position:fixed; inset:0; background:var(--overlay); display:flex; align-items:flex-end;
+    justify-content:center; z-index:50; animation:fadeIn .15s ease;
+  }
+  @keyframes fadeIn{ from{opacity:0} to{opacity:1} }
+  @keyframes slideUp{ from{transform:translateY(14px)} to{transform:translateY(0)} }
+  .modal-sheet{
+    position:relative; background:var(--bg-panel); width:100%; max-width:420px; border-radius:18px 18px 0 0;
+    padding:20px 20px calc(20px + env(safe-area-inset-bottom)); max-height:82vh; overflow-y:auto;
+    animation:slideUp .18s ease;
+  }
+  .modal-sheet h2{ font-size:16px; margin:0 0 16px; }
+  .modal-sheet label{ font-size:12px; color:var(--text-sub); display:block; margin:16px 0 6px; }
+  .modal-sheet input[type=text]{
+    width:100%; padding:11px 12px; border-radius:10px; border:1.5px solid var(--field-border);
+    font-size:14px; background:var(--field-bg); color:var(--text-main);
+  }
+  .row-btn{
+    width:100%; padding:12px; border-radius:10px; border:none; font-size:14px; font-weight:700;
+    margin-top:10px; cursor:pointer;
+  }
+  .row-btn.primary{ background:var(--line-green); color:#fff; }
+  .row-btn.ghost{ background:var(--chip-bg); color:var(--text-main); }
+  .row-btn.danger{ background:rgba(224,67,59,.12); color:var(--danger); }
+  .modal-sheet .close-x{
+    position:absolute; top:14px; right:16px; background:none; border:none; font-size:20px;
+    color:var(--text-sub); cursor:pointer;
+  }
+  .id-display{
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:11px; background:var(--chip-bg);
+    padding:8px 10px; border-radius:8px; word-break:break-all; color:var(--text-sub);
+    display:flex; justify-content:space-between; align-items:center; gap:8px;
+  }
+  .id-display button{ border:none; background:var(--border); color:var(--text-main); border-radius:6px; padding:4px 8px; font-size:11px; cursor:pointer; flex-shrink:0;}
+  .seg{ display:flex; gap:6px; }
+  .seg button{
+    flex:1; padding:9px 0; border-radius:9px; border:1.5px solid var(--field-border);
+    background:var(--field-bg); color:var(--text-main); font-size:13px; cursor:pointer;
+  }
+  .seg button.on{ border-color:var(--line-green); background:rgba(6,199,85,.12); font-weight:700; }
+  .switch-row{ display:flex; align-items:center; justify-content:space-between; padding:12px 0; border-bottom:1px solid var(--border); font-size:14px;}
+  .switch{ width:46px;height:26px;border-radius:13px;background:var(--border);position:relative;cursor:pointer;flex-shrink:0;transition:background .15s;}
+  .switch::after{ content:''; position:absolute; top:3px; left:3px; width:20px;height:20px;border-radius:50%;background:#fff; transition:transform .15s; box-shadow:0 1px 3px rgba(0,0,0,.3);}
+  .switch.on{ background:var(--line-green); }
+  .switch.on::after{ transform:translateX(20px); }
+  .stat-grid{ display:flex; gap:8px; margin-top:6px; }
+  .stat{ flex:1; background:var(--chip-bg); border-radius:10px; padding:10px 8px; text-align:center; }
+  .stat b{ display:block; font-size:19px; }
+  .stat span{ font-size:11px; color:var(--text-sub); }
+  .people-list{ margin-top:6px; }
+  .person{ display:flex; align-items:center; gap:10px; padding:9px 2px; font-size:14px; }
+  .person .who{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .person .badge{ font-size:10.5px; color:var(--text-sub); }
+  .person.online .badge{ color:var(--line-green); font-weight:700; }
+  .group-label{ font-size:11.5px; color:var(--text-sub); margin:14px 0 2px; }
+
+  .action-menu{
+    position:fixed; inset:0; z-index:60; background:var(--overlay);
+    display:flex; align-items:flex-end; justify-content:center; animation:fadeIn .12s ease;
+  }
+  .action-sheet{
+    background:var(--bg-panel); width:100%; max-width:420px; border-radius:18px 18px 0 0;
+    padding:10px 0 calc(10px + env(safe-area-inset-bottom)); animation:slideUp .16s ease;
+  }
+  .quick-react{ display:flex; justify-content:space-around; padding:6px 12px 12px; border-bottom:1px solid var(--border); }
+  .quick-react button{
+    background:none; border:none; font-size:26px; cursor:pointer; padding:4px 6px; border-radius:10px;
+    line-height:1;
+  }
+  .quick-react button.on{ background:rgba(6,199,85,.16); }
+  .action-item{
+    width:100%; background:none; border:none; text-align:left; padding:14px 20px; font-size:15px;
+    color:var(--text-main); cursor:pointer; display:flex; gap:12px; align-items:center;
+  }
+  .action-item:active{ background:var(--chip-bg); }
+  .action-item.danger{ color:var(--danger); }
+
+  #lightbox{
+    position:fixed; inset:0; z-index:90; background:rgba(0,0,0,.92); display:none;
+    align-items:center; justify-content:center; padding:20px;
+  }
+  #lightbox.open{ display:flex; }
+  #lightbox img{ max-width:100%; max-height:100%; object-fit:contain; border-radius:6px; }
+  #lightbox .lb-close{ position:absolute; top:14px; right:18px; background:none;border:none;color:#fff;font-size:26px;cursor:pointer;}
+  #lightbox .lb-dl{ position:absolute; bottom:24px; left:50%; transform:translateX(-50%); color:#fff; font-size:13px; text-decoration:underline;}
+
+  .toast{
+    position:fixed; bottom:96px; left:50%; transform:translateX(-50%);
+    background:rgba(0,0,0,.82); color:#fff; padding:9px 18px; border-radius:20px; font-size:12.5px;
+    z-index:100; animation:fadeIn .15s ease; max-width:88vw; text-align:center;
+  }
+  .empty-hint{ text-align:center; color:var(--text-sub); font-size:12.5px; margin-top:40px; line-height:1.9; }
+</style>
+</head>
+<body>
+
+<div id="app">
+
+  <!-- 入室画面 -->
+  <div id="gate">
+    <div class="card">
+      <div class="logo">💬</div>
+      <h1>みんなの部屋</h1>
+      <p class="sub">名前を入力して参加してください</p>
+      <input id="name-input" type="text" maxlength="20" placeholder="表示名（例：たろう）" autocomplete="off">
+      <button id="enter-btn">はじめる</button>
+      <div class="err" id="gate-err"></div>
+      <div class="hint">表示名は他の人と重複できません。<br>一度入室すると、次回からは自動で入室します。</div>
+    </div>
+  </div>
+
+  <!-- チャット画面 -->
+  <div id="chat" style="display:none; flex:1; min-height:0; flex-direction:column;">
+    <div id="header">
+      <div class="room-icon">👥</div>
+      <div class="titles" id="members-open">
+        <div class="name">みんなの部屋</div>
+        <div class="members" id="member-count"><span class="conn-dot" id="conn-dot"></span><span id="member-text">接続中…</span></div>
+      </div>
+      <button class="icon-btn" id="search-btn" title="検索" aria-label="メッセージを検索">🔍</button>
+      <button class="icon-btn" id="settings-btn" title="設定" aria-label="設定を開く">⚙️</button>
+    </div>
+
+    <div id="search-bar">
+      <input id="search-input" type="search" placeholder="メッセージを検索" autocomplete="off">
+      <button id="search-close">閉じる</button>
+    </div>
+
+    <div id="chat-body">
+      <div id="messages"><div id="top-sentinel"></div></div>
+      <div id="search-results"></div>
+      <div id="typing"></div>
+      <button id="jump-btn"></button>
+    </div>
+
+    <div id="reply-bar">
+      <div class="bar-body">
+        <div class="bar-label" id="reply-label">返信</div>
+        <div class="bar-text" id="reply-text"></div>
+      </div>
+      <button class="bar-close" id="reply-cancel" aria-label="返信をやめる">✕</button>
+    </div>
+
+    <div id="edit-bar">
+      <div class="bar-body">
+        <div class="bar-label">メッセージを編集中</div>
+        <div class="bar-text" id="edit-text"></div>
+      </div>
+      <button class="bar-close" id="edit-cancel" aria-label="編集をやめる">✕</button>
+    </div>
+
+    <div id="image-bar">
+      <img id="image-thumb" alt="">
+      <div class="img-name" id="image-name"></div>
+      <button class="bar-close" id="image-cancel" aria-label="画像を外す">✕</button>
+    </div>
+
+    <div id="byte-counter">0 / 1,048,576 バイト</div>
+    <div id="composer" style="position:relative;">
+      <div id="mention-box"></div>
+      <button class="round-btn" id="attach-btn" title="画像を送る" aria-label="画像を送る">＋</button>
+      <textarea id="text-input" rows="1" placeholder="メッセージを入力"></textarea>
+      <button class="round-btn" id="send-btn" aria-label="送信">➤</button>
+      <input type="file" id="file-input" accept="image/*" hidden>
+    </div>
+  </div>
+
+</div>
+
+<div id="drop-hint">ここにドロップして画像を送る</div>
+
+<div id="lightbox">
+  <button class="lb-close" aria-label="閉じる">✕</button>
+  <img alt="添付画像">
+  <a class="lb-dl" target="_blank" rel="noopener">元のサイズで開く</a>
+</div>
+
+<script type="module">
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+
+/* ============================================================
+   接続情報の復号（難読化解除）
+   ------------------------------------------------------------
+   Base64エンコード → 文字列反転、の順で難読化して埋め込んである値を
+   実行時に「反転 → Base64デコード」して元に戻す。
+   ※publishable keyはブラウザに公開される前提の鍵だが、
+     ソース上に平文で置かないという指示のため難読化している。
+     秘匿性は無い（開発者ツールから復元可能）ので、実際の保護は
+     schema.sql の RLS 側で行うこと。
+   ============================================================ */
+function deobfuscate(scrambled) {
+  const b64 = scrambled.split('').reverse().join('');
+  return atob(b64);
+}
+const SUPABASE_URL = deobfuscate('==wbj5SZzFmYhBXdz5yYjhWa0pmezdWarJme4hGZ4dXd59yL6MHc0RHa');
+const SUPABASE_KEY = deobfuscate('==QRBV2MuZVYo91Z6JGeGl0SQx0ZQRWd2FmdR5mTSZWVfVGbiFGazlGbiVHcfJ2c');
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+/* ============================================================
+   定数
+   ============================================================ */
+const LS = {
+  DBID: 'line_chat_dbid',
+  NAME: 'line_chat_name',
+  THEME: 'line_chat_theme',        // system | light | dark
+  FONT: 'line_chat_font',          // s | m | l
+  SOUND: 'line_chat_sound',        // 1 | 0
+  LASTSEEN: 'line_chat_last_seen', // 最後に読んだメッセージのcreated_at
+};
+const MAX_BYTES = 1024 * 1024;     // 1024KB
+const COLLAPSE_LEN = 300;          // これを超える本文は折りたたむ
+const PAGE_SIZE = 50;              // 1回に読み込む過去ログ件数
+const BUCKET = 'chat-images';
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+// Supabase無料プランの目安上限。実際のプランに合わせて調整すること。
+const STORAGE_LIMIT_BYTES = 1024 * 1024 * 1024;   // 1GB
+const STORAGE_SAFE_MARGIN  = 20 * 1024 * 1024;    // これだけ余裕を残して自動停止する
+const QUICK_EMOJI = ['👍', '❤️', '😂', '😮', '🙏', '🎉'];
+const AVATAR_COLORS = ['#f2545b','#f4a259','#e8b800','#4caf50','#00b1b5','#3f8ae0','#7c6ce0','#d4569f','#8a7a68','#4a6b8a'];
+
+/* ============================================================
+   状態
+   ============================================================ */
+let myDbid = localStorage.getItem(LS.DBID);
+let myName = localStorage.getItem(LS.NAME);
+let myColor = null;
+
+let msgs = [];                      // 表示中のメッセージ(created_at昇順)
+const msgById = new Map();
+const reactionsByMsg = new Map();   // message_id -> Map(emoji -> Set(dbid))
+const reactionById = new Map();     // reaction_id -> {message_id, dbid, emoji}
+const knownUsers = new Map();       // dbid -> {display_name, avatar_color, online}
+
+let replyTo = null;
+let editingId = null;
+let pendingImage = null;
+let storageUsedBytes = 0;
+let storageFull = false;
+let hasOlder = true;
+let loadingOlder = false;
+let unreadCount = 0;
+let unreadBoundary = localStorage.getItem(LS.LASTSEEN) || null;
+let lastReadAt = unreadBoundary;
+let atBottom = true;
+let presenceChannel = null;
+let dbChannel = null;
+let typingTimers = new Map();
+let lastTypingSent = 0;
+let audioCtx = null;
+let searchAbort = 0;
+
+const $ = (sel) => document.querySelector(sel);
+const gateEl = $('#gate');
+const chatEl = $('#chat');
+const nameInput = $('#name-input');
+const enterBtn = $('#enter-btn');
+const gateErr = $('#gate-err');
+const messagesEl = $('#messages');
+const textInput = $('#text-input');
+const sendBtn = $('#send-btn');
+const byteCounterEl = $('#byte-counter');
+const memberTextEl = $('#member-text');
+const connDot = $('#conn-dot');
+const typingEl = $('#typing');
+const jumpBtn = $('#jump-btn');
+const searchBar = $('#search-bar');
+const searchInput = $('#search-input');
+const searchResults = $('#search-results');
+const mentionBox = $('#mention-box');
+const fileInput = $('#file-input');
+const lightbox = $('#lightbox');
+
+/* ============================================================
+   外観設定（テーマ・文字サイズ）
+   ============================================================ */
+const prefersDark = window.matchMedia('(prefers-color-scheme: dark)');
+prefersDark.addEventListener('change', applyTheme);
+
+function applyTheme() {
+  const pref = localStorage.getItem(LS.THEME) || 'system';
+  const dark = pref === 'dark' || (pref === 'system' && prefersDark.matches);
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  const meta = document.querySelector('meta[name=theme-color]');
+  if (meta) meta.content = dark ? '#1c1f23' : '#06c755';
+}
+function applyFontSize() {
+  const size = localStorage.getItem(LS.FONT) || 'm';
+  document.documentElement.style.setProperty('--font-scale', size === 's' ? '0.88' : size === 'l' ? '1.16' : '1');
+}
+applyTheme();
+applyFontSize();
+
+/* ============================================================
+   起動処理
+   ============================================================ */
+init();
+
+async function init() {
+  if (myDbid && myName) {
+    const ok = await syncUserToServer(myDbid, myName);
+    if (ok) { enterChat(); return; }
+    // 同期に失敗した場合（名前が別の人に取られた等）は入室画面へ
+  }
+  showGate();
+}
+
+function showGate() {
+  gateEl.style.display = 'flex';
+  chatEl.style.display = 'none';
+  nameInput.value = myName || '';
+  nameInput.focus();
+}
+
+enterBtn.addEventListener('click', handleEnter);
+nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') handleEnter(); });
+
+async function handleEnter() {
+  const name = nameInput.value.trim();
+  gateErr.textContent = '';
+  if (!name) { gateErr.textContent = '表示名を入力してください。'; return; }
+  if (name.length > 20) { gateErr.textContent = '表示名は20文字以内にしてください。'; return; }
+
+  enterBtn.disabled = true; enterBtn.textContent = '確認中…';
+  const newDbid = myDbid || crypto.randomUUID();  // Web Crypto APIでランダムID発行
+  const ok = await syncUserToServer(newDbid, name);
+  enterBtn.disabled = false; enterBtn.textContent = 'はじめる';
+
+  if (ok) {
+    myDbid = newDbid;
+    myName = name;
+    localStorage.setItem(LS.DBID, myDbid);
+    localStorage.setItem(LS.NAME, myName);
+    enterChat();
+  }
+}
+
+// users テーブルへ upsert。表示名の重複は一意制約違反(23505)で検知する。
+async function syncUserToServer(dbid, name) {
+  myColor = colorForDbid(dbid);
+  const { error } = await supabase.from('users').upsert({
+    dbid,
+    display_name: name,
+    avatar_color: myColor,
+    last_seen: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'dbid' });
+
+  if (error) {
+    if (error.code === '23505') {
+      gateErr.textContent = 'その表示名はすでに使われています。別の名前にしてください。';
+    } else {
+      gateErr.textContent = '接続エラー: ' + error.message;
+    }
+    return false;
+  }
+  return true;
+}
+
+function colorForDbid(dbid) {
+  let h = 0;
+  for (const ch of String(dbid)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return AVATAR_COLORS[h % AVATAR_COLORS.length];
+}
+
+/* ============================================================
+   チャット画面
+   ============================================================ */
+async function enterChat() {
+  gateEl.style.display = 'none';
+  chatEl.style.display = 'flex';
+  await loadUsers();
+  await loadLatest();
+  subscribeRealtime();
+  subscribePresence();
+  observeTopSentinel();
+  updateByteCounter();
+  refreshStorageUsage();
+  setInterval(() => { if (document.visibilityState === 'visible') refreshStorageUsage(); }, 120000);
+}
+
+async function loadUsers() {
+  const { data } = await supabase.from('users').select('dbid, display_name, avatar_color, last_seen');
+  if (!data) return;
+  for (const u of data) {
+    knownUsers.set(u.dbid, { name: u.display_name, color: u.avatar_color || colorForDbid(u.dbid), online: false });
+  }
+}
+
+/* ---------- 初回・最新の読み込み ---------- */
+async function loadLatest() {
+  messagesEl.innerHTML = '<div class="empty-hint">読み込み中…</div>';
+  const { data, error } = await supabase
+    .from('messages').select('*')
+    .order('created_at', { ascending: false })
+    .limit(PAGE_SIZE);
+
+  if (error) {
+    messagesEl.innerHTML = `<div class="empty-hint">読み込めませんでした。<br>${escapeHtml(error.message)}</div>`;
+    return;
+  }
+  msgs = (data || []).slice().reverse();
+  hasOlder = (data || []).length === PAGE_SIZE;
+  msgById.clear();
+  for (const m of msgs) msgById.set(m.id, m);
+  await loadReactionsFor(msgs.map((m) => m.id));
+  renderAll();
+  scrollToBottom(true);
+  markRead();
+}
+
+// 検索結果からのジャンプ用: 指定メッセージの前後を読み込む
+async function loadAround(target) {
+  const [before, after] = await Promise.all([
+    supabase.from('messages').select('*').lt('created_at', target.created_at)
+      .order('created_at', { ascending: false }).limit(30),
+    supabase.from('messages').select('*').gte('created_at', target.created_at)
+      .order('created_at', { ascending: true }).limit(30),
+  ]);
+  const list = [...(before.data || []).reverse(), ...(after.data || [])];
+  msgs = dedupe(list);
+  hasOlder = (before.data || []).length === 30;
+  msgById.clear();
+  for (const m of msgs) msgById.set(m.id, m);
+  await loadReactionsFor(msgs.map((m) => m.id));
+  renderAll();
+  focusMessage(target.id);
+}
+
+async function loadOlder() {
+  if (loadingOlder || !hasOlder || !msgs.length) return;
+  loadingOlder = true;
+  const note = document.createElement('div');
+  note.className = 'loading-older';
+  note.textContent = '過去のメッセージを読み込み中…';
+  messagesEl.insertBefore(note, messagesEl.firstChild.nextSibling);
+
+  const { data } = await supabase.from('messages').select('*')
+    .lt('created_at', msgs[0].created_at)
+    .order('created_at', { ascending: false })
+    .limit(PAGE_SIZE);
+
+  note.remove();
+  const older = (data || []).slice().reverse();
+  hasOlder = (data || []).length === PAGE_SIZE;
+  if (older.length) {
+    const prevHeight = messagesEl.scrollHeight;
+    const prevTop = messagesEl.scrollTop;
+    msgs = dedupe([...older, ...msgs]);
+    for (const m of older) msgById.set(m.id, m);
+    await loadReactionsFor(older.map((m) => m.id));
+    renderAll();
+    messagesEl.scrollTop = prevTop + (messagesEl.scrollHeight - prevHeight);
+  }
+  loadingOlder = false;
+}
+
+function dedupe(list) {
+  const seen = new Set();
+  return list.filter((m) => (seen.has(m.id) ? false : (seen.add(m.id), true)))
+             .sort((a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0));
+}
+
+// IntersectionObserver: 上端に到達したら過去ログを追加読み込み
+let topObserver = null;
+function observeTopSentinel() {
+  if (!topObserver) {
+    topObserver = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) loadOlder();
+    }, { root: messagesEl, rootMargin: '120px' });
+  }
+  const sentinel = $('#top-sentinel');
+  if (sentinel) topObserver.observe(sentinel);
+}
+
+async function loadReactionsFor(ids) {
+  if (!ids.length) return;
+  const { data } = await supabase.from('reactions').select('*').in('message_id', ids);
+  for (const r of data || []) storeReaction(r);
+}
+
+function storeReaction(r) {
+  reactionById.set(r.id, r);
+  if (!reactionsByMsg.has(r.message_id)) reactionsByMsg.set(r.message_id, new Map());
+  const byEmoji = reactionsByMsg.get(r.message_id);
+  if (!byEmoji.has(r.emoji)) byEmoji.set(r.emoji, new Set());
+  byEmoji.get(r.emoji).add(r.dbid);
+}
+
+function dropReaction(r) {
+  reactionById.delete(r.id);
+  const byEmoji = reactionsByMsg.get(r.message_id);
+  if (!byEmoji) return;
+  const set = byEmoji.get(r.emoji);
+  if (!set) return;
+  set.delete(r.dbid);
+  if (!set.size) byEmoji.delete(r.emoji);
+}
+
+/* ============================================================
+   Realtime（メッセージ・リアクション）
+   ============================================================ */
+function subscribeRealtime() {
+  if (dbChannel) supabase.removeChannel(dbChannel);
+  dbChannel = supabase.channel('db-changes')
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (p) => onInsert(p.new))
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, (p) => onUpdate(p.new))
+    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, (p) => onDelete(p.old))
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'reactions' }, (p) => {
+      storeReaction(p.new);
+      renderReactions(p.new.message_id);
+    })
+    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'reactions' }, (p) => {
+      const known = reactionById.get(p.old.id) || p.old;
+      if (!known || !known.message_id) return;
+      dropReaction(known);
+      renderReactions(known.message_id);
+    })
+    .subscribe((status) => setConnected(status === 'SUBSCRIBED'));
+}
+
+function onInsert(m) {
+  // 楽観的に描画済みの自分のメッセージは、確定版で置き換える
+  if (m.client_id) {
+    const temp = messagesEl.querySelector(`[data-client-id="${cssEscape(m.client_id)}"]`);
+    if (temp) temp.remove();
+  }
+  if (msgById.has(m.id)) return;
+  msgById.set(m.id, m);
+  msgs.push(m);
+  const wasAtBottom = atBottom;
+  appendRow(m);
+  if (wasAtBottom) {
+    scrollToBottom();
+    markRead();
+  } else if (m.sender_dbid !== myDbid) {
+    unreadCount++;
+    updateJumpButton();
+  }
+  if (m.sender_dbid !== myDbid) {
+    notifyIncoming(m);
+    clearTyping(m.sender_dbid);
+  }
+}
+
+function onUpdate(m) {
+  const idx = msgs.findIndex((x) => x.id === m.id);
+  if (idx >= 0) msgs[idx] = m;
+  msgById.set(m.id, m);
+  const row = rowOf(m.id);
+  if (row) {
+    const fresh = buildRow(m);
+    row.replaceWith(fresh);
+    renderReactions(m.id);
+    updateReadReceipts();
+  }
+}
+
+function onDelete(old) {
+  if (!old || !old.id) return;
+  msgs = msgs.filter((x) => x.id !== old.id);
+  msgById.delete(old.id);
+  const row = rowOf(old.id);
+  if (row) row.remove();
+}
+
+/* ---------- Presence（オンライン状況・既読位置） ---------- */
+function subscribePresence() {
+  if (presenceChannel) supabase.removeChannel(presenceChannel);
+  presenceChannel = supabase.channel('room:main-presence', {
+    config: { presence: { key: myDbid }, broadcast: { self: false } },
+  });
+  presenceChannel
+    .on('presence', { event: 'sync' }, onPresenceSync)
+    .on('broadcast', { event: 'typing' }, ({ payload }) => showTyping(payload))
+    .subscribe(async (status) => {
+      if (status === 'SUBSCRIBED') await trackPresence();
+    });
+}
+
+async function trackPresence() {
+  if (!presenceChannel) return;
+  try {
+    await presenceChannel.track({
+      dbid: myDbid, name: myName, color: myColor || colorForDbid(myDbid),
+      last_read_at: lastReadAt, online_at: new Date().toISOString(),
+    });
+  } catch (_) { /* 未接続時は無視 */ }
+}
+
+function onPresenceSync() {
+  const state = presenceChannel.presenceState();
+  for (const u of knownUsers.values()) u.online = false;
+  let count = 0;
+  for (const key of Object.keys(state)) {
+    const p = state[key][0];
+    if (!p) continue;
+    count++;
+    const dbid = p.dbid || key;
+    const prev = knownUsers.get(dbid) || {};
+    knownUsers.set(dbid, { name: p.name || prev.name || '？', color: p.color || colorForDbid(dbid), online: true, last_read_at: p.last_read_at });
+  }
+  memberTextEl.textContent = `${count}人が参加中`;
+  updateReadReceipts();
+}
+
+function setConnected(ok) {
+  connDot.classList.toggle('off', !ok);
+  if (!ok) memberTextEl.textContent = '接続していません';
+}
+
+window.addEventListener('online', async () => {
+  setConnected(true);
+  subscribeRealtime();
+  subscribePresence();
+  await refreshSince();
+});
+window.addEventListener('offline', () => setConnected(false));
+
+// 再接続時、取りこぼした分だけ取得する
+async function refreshSince() {
+  if (!msgs.length) { await loadLatest(); return; }
+  const last = msgs[msgs.length - 1].created_at;
+  const { data } = await supabase.from('messages').select('*')
+    .gt('created_at', last).order('created_at', { ascending: true }).limit(200);
+  for (const m of data || []) onInsert(m);
+}
+
+/* ============================================================
+   描画
+   ============================================================ */
+function rowOf(id) { return messagesEl.querySelector(`[data-msg-id="${cssEscape(id)}"]`); }
+function cssEscape(v) { return String(v).replace(/["\\]/g, '\\$&'); }
+
+function renderAll() {
+  messagesEl.innerHTML = '<div id="top-sentinel"></div>';
+  observeTopSentinel();
+  if (!msgs.length) {
+    const hint = document.createElement('div');
+    hint.className = 'empty-hint';
+    hint.innerHTML = 'まだメッセージはありません。<br>最初のひとことを送ってみましょう。';
+    messagesEl.appendChild(hint);
+    return;
+  }
+  let lastDay = null;
+  let unreadShown = false;
+  for (const m of msgs) {
+    lastDay = maybeInsertDaySeparator(m.created_at, lastDay);
+    if (!unreadShown && unreadBoundary && ts(m.created_at) > ts(unreadBoundary) && m.sender_dbid !== myDbid) {
+      const sep = document.createElement('div');
+      sep.className = 'unread-sep';
+      sep.innerHTML = '<span>ここから未読</span>';
+      messagesEl.appendChild(sep);
+      unreadShown = true;
+    }
+    messagesEl.appendChild(buildRow(m));
+  }
+  updateReadReceipts();
+}
+
+function appendRow(m) {
+  const hint = messagesEl.querySelector('.empty-hint');
+  if (hint) hint.remove();
+  const rows = messagesEl.querySelectorAll('.msg-row');
+  const prev = rows[rows.length - 1];
+  const prevDay = prev ? prev.dataset.day : null;
+  maybeInsertDaySeparator(m.created_at, prevDay);
+  messagesEl.appendChild(buildRow(m));
+  updateReadReceipts();
+}
+
+function maybeInsertDaySeparator(iso, lastDay) {
+  const day = dayLabel(iso);
+  if (day !== lastDay) {
+    const sep = document.createElement('div');
+    sep.className = 'day-sep';
+    sep.appendChild(el('span', day));
+    messagesEl.appendChild(sep);
+  }
+  return day;
+}
+
+function dayLabel(iso) {
+  const d = new Date(iso);
+  const today = new Date();
+  const yst = new Date(); yst.setDate(today.getDate() - 1);
+  const same = (a, b) => a.toDateString() === b.toDateString();
+  if (same(d, today)) return '今日';
+  if (same(d, yst)) return '昨日';
+  return d.toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' });
+}
+
+/* ---------- 1件ぶんのバブル ---------- */
+function buildRow(m) {
+  const mine = m.sender_dbid === myDbid;
+  const row = document.createElement('div');
+  row.className = 'msg-row ' + (mine ? 'mine' : 'theirs');
+  row.dataset.msgId = m.id;
+  row.dataset.day = dayLabel(m.created_at);
+  if (m.client_id) row.dataset.clientId = m.client_id;
+  if (m.__pending) row.classList.add('sending');
+  if (!mine && mentionsMe(m.content)) row.classList.add('mentions-me');
+
+  const col = document.createElement('div');
+  col.className = 'bubble-col';
+
+  if (!mine) col.appendChild(el('div', m.sender_name, 'sender-name'));
+
+  const wrap = document.createElement('div');
+  wrap.className = 'bubble-wrap';
+
+  if (!mine) {
+    const av = document.createElement('div');
+    av.className = 'avatar';
+    av.style.background = (knownUsers.get(m.sender_dbid) || {}).color || colorForDbid(m.sender_dbid);
+    av.textContent = (m.sender_name || '?').trim().slice(0, 1).toUpperCase();
+    wrap.appendChild(av);
+  }
+
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  fillBubble(bubble, m);
+  wrap.appendChild(bubble);
+
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  if (mine && !m.__pending) meta.appendChild(el('div', '', 'read-mark'));
+  meta.appendChild(el('div', m.__pending ? '🕘' : timeLabel(m.created_at), 'time'));
+  if (m.edited_at) meta.appendChild(el('div', '編集済み', 'edited-mark'));
+  if (m.__failed) {
+    const retry = document.createElement('button');
+    retry.className = 'retry-btn';
+    retry.textContent = '再送';
+    retry.addEventListener('click', () => retrySend(m));
+    meta.appendChild(retry);
+  } else if (!m.__pending) {
+    const more = document.createElement('button');
+    more.className = 'more-btn';
+    more.textContent = '⋯';
+    more.setAttribute('aria-label', 'メッセージの操作');
+    more.addEventListener('click', (e) => { e.stopPropagation(); openActionMenu(m); });
+    meta.appendChild(more);
+  }
+  wrap.appendChild(meta);
+
+  col.appendChild(wrap);
+
+  const rx = document.createElement('div');
+  rx.className = 'reactions';
+  rx.dataset.rxFor = m.id;
+  col.appendChild(rx);
+
+  row.appendChild(col);
+
+  // 長押し(スマホ) / 右クリック(PC) でもメニューを開く
+  if (!m.__pending) {
+    let timer = null;
+    bubble.addEventListener('contextmenu', (e) => { e.preventDefault(); openActionMenu(m); });
+    bubble.addEventListener('touchstart', () => {
+      timer = setTimeout(() => { navigator.vibrate?.(12); openActionMenu(m); }, 450);
+    }, { passive: true });
+    ['touchend', 'touchmove', 'touchcancel'].forEach((ev) =>
+      bubble.addEventListener(ev, () => clearTimeout(timer), { passive: true }));
+  }
+
+  queueMicrotask(() => renderReactions(m.id));
+  return row;
+}
+
+// タイムスタンプの文字列表現がDBとブラウザで異なるため、比較は必ず数値で行う
+function ts(iso) { return iso ? Date.parse(iso) : 0; }
+
+function timeLabel(iso) {
+  return new Date(iso).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+}
+
+function el(tag, text, cls) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text) n.textContent = text;
+  return n;
+}
+
+/* ---------- バブルの中身（引用・画像・本文） ---------- */
+function fillBubble(bubble, m) {
+  bubble.textContent = '';
+
+  if (m.reply_to) {
+    const src = msgById.get(m.reply_to);
+    const q = document.createElement('div');
+    q.className = 'quote';
+    q.appendChild(el('span', src ? src.sender_name : '削除されたメッセージ', 'q-name'));
+    q.appendChild(el('span', src ? previewOf(src) : '元のメッセージは見つかりません', 'q-text'));
+    q.addEventListener('click', (e) => { e.stopPropagation(); jumpTo(m.reply_to); });
+    bubble.appendChild(q);
+  }
+
+  if (m.image_url) {
+    const img = document.createElement('img');
+    img.className = 'msg-image';
+    img.loading = 'lazy';
+    img.src = m.image_url;
+    img.alt = '添付画像';
+    img.addEventListener('click', (e) => { e.stopPropagation(); openLightbox(m.image_url); });
+    bubble.appendChild(img);
+  }
+
+  const content = m.content || '';
+  if (!content) return;
+  const holder = document.createElement('span');
+  holder.className = 'msg-text';
+  if (content.length <= COLLAPSE_LEN) {
+    renderRichText(holder, content);
+  } else {
+    const short = content.slice(0, COLLAPSE_LEN);
+    const body = document.createElement('span');
+    renderRichText(body, short + '…');
+    const toggle = el('div', `もっと見る（${content.length.toLocaleString()}文字）`, 'more-toggle');
+    let expanded = false;
+    toggle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      expanded = !expanded;
+      body.textContent = '';
+      renderRichText(body, expanded ? content : short + '…');
+      toggle.textContent = expanded ? '閉じる' : `もっと見る（${content.length.toLocaleString()}文字）`;
+    });
+    holder.appendChild(body);
+    holder.appendChild(toggle);
+  }
+  bubble.appendChild(holder);
+}
+
+function previewOf(m) {
+  const t = (m.content || '').replace(/\s+/g, ' ').trim();
+  if (t) return t.length > 60 ? t.slice(0, 60) + '…' : t;
+  return m.image_url ? '画像' : '';
+}
+
+/* ---------- 本文の装飾（URL・メンション・簡易Markdown） ----------
+   すべて DOM API で組み立てるので innerHTML 経由のXSSは発生しない */
+const RICH_RE = /(https?:\/\/[^\s<>"']+)|(@[^\s@]{1,20})|\*\*([^*]+)\*\*|(?<!\*)\*([^*\n]+)\*(?!\*)|~~([^~]+)~~|`([^`]+)`/g;
+
+function renderRichText(target, text) {
+  let last = 0;
+  for (const mt of text.matchAll(RICH_RE)) {
+    if (mt.index > last) target.appendChild(document.createTextNode(text.slice(last, mt.index)));
+    const [full, url, mention, bold, italic, strike, code] = mt;
+    if (url) {
+      const a = document.createElement('a');
+      a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = url;
+      target.appendChild(a);
+    } else if (mention) {
+      const name = mention.slice(1);
+      if (isKnownName(name)) {
+        target.appendChild(el('span', mention, 'mention'));
+      } else {
+        target.appendChild(document.createTextNode(full));
+      }
+    } else if (bold) {
+      target.appendChild(el('strong', bold));
+    } else if (italic) {
+      target.appendChild(el('em', italic));
+    } else if (strike) {
+      target.appendChild(el('del', strike));
+    } else if (code) {
+      target.appendChild(el('code', code));
+    }
+    last = mt.index + full.length;
+  }
+  if (last < text.length) target.appendChild(document.createTextNode(text.slice(last)));
+}
+
+function isKnownName(name) {
+  if (name === myName) return true;
+  for (const u of knownUsers.values()) if (u.name === name) return true;
+  return false;
+}
+
+function mentionsMe(content) {
+  if (!content || !myName) return false;
+  return content.includes('@' + myName);
+}
+
+/* ---------- リアクション ---------- */
+function renderReactions(messageId) {
+  const holder = messagesEl.querySelector(`[data-rx-for="${cssEscape(messageId)}"]`);
+  if (!holder) return;
+  holder.textContent = '';
+  const byEmoji = reactionsByMsg.get(messageId);
+  if (!byEmoji || !byEmoji.size) return;
+  for (const [emoji, dbids] of byEmoji) {
+    if (!dbids.size) continue;
+    const chip = document.createElement('button');
+    chip.className = 'reaction' + (dbids.has(myDbid) ? ' by-me' : '');
+    chip.appendChild(document.createTextNode(emoji));
+    chip.appendChild(el('span', String(dbids.size), 'n'));
+    chip.title = [...dbids].map((d) => (knownUsers.get(d) || {}).name || '不明').join('、');
+    chip.addEventListener('click', () => toggleReaction(messageId, emoji));
+    holder.appendChild(chip);
+  }
+}
+
+async function toggleReaction(messageId, emoji) {
+  const set = reactionsByMsg.get(messageId)?.get(emoji);
+  const mine = set && set.has(myDbid);
+  if (mine) {
+    // 楽観的に消してからサーバーへ
+    for (const [id, r] of reactionById) {
+      if (r.message_id === messageId && r.dbid === myDbid && r.emoji === emoji) { dropReaction({ ...r, id }); break; }
+    }
+    renderReactions(messageId);
+    const { error } = await supabase.from('reactions').delete()
+      .match({ message_id: messageId, dbid: myDbid, emoji });
+    if (error) showToast('リアクションを外せませんでした');
+  } else {
+    const { data, error } = await supabase.from('reactions')
+      .insert({ message_id: messageId, dbid: myDbid, emoji }).select().single();
+    if (error) { showToast('リアクションを付けられませんでした'); return; }
+    storeReaction(data);
+    renderReactions(messageId);
+  }
+}
+
+/* ---------- 既読表示（Presenceのlast_read_atから算出） ---------- */
+function updateReadReceipts() {
+  const others = [...knownUsers.entries()].filter(([d, u]) => u.online && d !== myDbid);
+  for (const row of messagesEl.querySelectorAll('.msg-row.mine')) {
+    const m = msgById.get(row.dataset.msgId);
+    const mark = row.querySelector('.read-mark');
+    if (!m || !mark) continue;
+    const n = others.filter(([, u]) => u.last_read_at && ts(u.last_read_at) >= ts(m.created_at)).length;
+    mark.textContent = n > 0 ? `既読${others.length > 1 ? ' ' + n : ''}` : '';
+  }
+}
+
+function markRead() {
+  if (!msgs.length) return;
+  const newest = msgs[msgs.length - 1].created_at;
+  if (lastReadAt && ts(lastReadAt) >= ts(newest)) return;
+  lastReadAt = newest;
+  localStorage.setItem(LS.LASTSEEN, lastReadAt);
+  trackPresence();
+}
+
+/* ---------- 入力中インジケーター ---------- */
+function showTyping({ dbid, name }) {
+  if (!dbid || dbid === myDbid) return;
+  clearTimeout(typingTimers.get(dbid)?.timer);
+  typingTimers.set(dbid, { name, timer: setTimeout(() => clearTyping(dbid), 3200) });
+  paintTyping();
+}
+function clearTyping(dbid) {
+  const t = typingTimers.get(dbid);
+  if (t) clearTimeout(t.timer);
+  typingTimers.delete(dbid);
+  paintTyping();
+}
+function paintTyping() {
+  const names = [...typingTimers.values()].map((t) => t.name).filter(Boolean);
+  if (!names.length) { typingEl.classList.remove('show'); return; }
+  const label = names.length === 1 ? `${names[0]}さんが入力中` : `${names.length}人が入力中`;
+  typingEl.textContent = '';
+  typingEl.appendChild(document.createTextNode(label));
+  const dots = el('span', '', 'dots');
+  dots.innerHTML = '<span>・</span><span>・</span><span>・</span>';
+  typingEl.appendChild(dots);
+  typingEl.classList.add('show');
+}
+function sendTyping() {
+  const now = Date.now();
+  if (now - lastTypingSent < 1500 || !presenceChannel) return;
+  lastTypingSent = now;
+  presenceChannel.send({ type: 'broadcast', event: 'typing', payload: { dbid: myDbid, name: myName } })
+    .catch(() => {});
+}
+
+/* ---------- スクロール・未読 ---------- */
+messagesEl.addEventListener('scroll', () => {
+  const dist = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight;
+  atBottom = dist < 80;
+  if (atBottom) {
+    unreadCount = 0;
+    updateJumpButton();
+    markRead();
+  }
+});
+
+function scrollToBottom(instant) {
+  requestAnimationFrame(() => {
+    messagesEl.scrollTo({ top: messagesEl.scrollHeight, behavior: instant ? 'auto' : 'smooth' });
+    atBottom = true;
+  });
+}
+
+function updateJumpButton() {
+  if (unreadCount > 0) {
+    jumpBtn.textContent = `新着 ${unreadCount}件 ↓`;
+    jumpBtn.classList.add('show');
+  } else if (!atBottom) {
+    jumpBtn.textContent = '最新へ ↓';
+    jumpBtn.classList.add('show');
+  } else {
+    jumpBtn.classList.remove('show');
+  }
+  updateTitleBadge();
+}
+jumpBtn.addEventListener('click', () => { unreadCount = 0; scrollToBottom(); updateJumpButton(); markRead(); });
+
+function updateTitleBadge() {
+  document.title = unreadCount > 0 ? `(${unreadCount}) トーク | LINE風チャット` : 'トーク | LINE風チャット';
+}
+
+async function jumpTo(id) {
+  if (msgById.has(id) && rowOf(id)) { focusMessage(id); return; }
+  const { data } = await supabase.from('messages').select('*').eq('id', id).maybeSingle();
+  if (!data) { showToast('元のメッセージは見つかりませんでした'); return; }
+  await loadAround(data);
+}
+
+function focusMessage(id) {
+  const row = rowOf(id);
+  if (!row) return;
+  row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  row.classList.remove('highlight');
+  void row.offsetWidth;
+  row.classList.add('highlight');
+}
+
+/* ============================================================
+   メッセージのアクションメニュー
+   ============================================================ */
+function openActionMenu(m) {
+  const mine = m.sender_dbid === myDbid;
+  const overlay = document.createElement('div');
+  overlay.className = 'action-menu';
+  const sheet = document.createElement('div');
+  sheet.className = 'action-sheet';
+
+  const quick = document.createElement('div');
+  quick.className = 'quick-react';
+  for (const emoji of QUICK_EMOJI) {
+    const b = document.createElement('button');
+    b.textContent = emoji;
+    if (reactionsByMsg.get(m.id)?.get(emoji)?.has(myDbid)) b.classList.add('on');
+    b.addEventListener('click', () => { toggleReaction(m.id, emoji); overlay.remove(); });
+    quick.appendChild(b);
+  }
+  sheet.appendChild(quick);
+
+  const add = (label, icon, fn, danger) => {
+    const b = document.createElement('button');
+    b.className = 'action-item' + (danger ? ' danger' : '');
+    b.appendChild(el('span', icon));
+    b.appendChild(el('span', label));
+    b.addEventListener('click', () => { overlay.remove(); fn(); });
+    sheet.appendChild(b);
+  };
+
+  add('返信する', '↩️', () => startReply(m));
+  if (m.content) add('本文をコピー', '📋', async () => {
+    await navigator.clipboard.writeText(m.content);
+    showToast('コピーしました');
+  });
+  if (m.image_url) add('画像を開く', '🖼️', () => openLightbox(m.image_url));
+  if (mine && m.content) add('編集する', '✏️', () => startEdit(m));
+  if (mine && m.image_url) add('画像だけ削除', '🖼️🗑️', () => deleteImageOnly(m), true);
+  if (mine) add('削除する', '🗑️', () => deleteMessage(m.id), true);
+
+  overlay.appendChild(sheet);
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+}
+
+/* ---------- 返信 ---------- */
+function startReply(m) {
+  cancelEdit();
+  replyTo = m;
+  $('#reply-label').textContent = `${m.sender_name}さんに返信`;
+  $('#reply-text').textContent = previewOf(m) || '画像';
+  $('#reply-bar').classList.add('open');
+  textInput.focus();
+}
+function cancelReply() {
+  replyTo = null;
+  $('#reply-bar').classList.remove('open');
+}
+$('#reply-cancel').addEventListener('click', cancelReply);
+
+/* ---------- 編集 ---------- */
+function startEdit(m) {
+  cancelReply();
+  editingId = m.id;
+  $('#edit-text').textContent = previewOf(m);
+  $('#edit-bar').classList.add('open');
+  textInput.value = m.content;
+  autoGrow(textInput);
+  updateByteCounter();
+  textInput.focus();
+  textInput.setSelectionRange(textInput.value.length, textInput.value.length);
+}
+function cancelEdit() {
+  if (!editingId) return;
+  editingId = null;
+  $('#edit-bar').classList.remove('open');
+  textInput.value = '';
+  autoGrow(textInput);
+  updateByteCounter();
+}
+$('#edit-cancel').addEventListener('click', cancelEdit);
+
+async function deleteMessage(id) {
+  if (!confirm('このメッセージを削除しますか？')) return;
+  const row = rowOf(id);
+  const target = msgById.get(id);
+  const { error } = await supabase.from('messages').delete().eq('id', id);
+  if (error) { showToast('削除できませんでした: ' + error.message); return; }
+  if (row) row.remove();
+  msgs = msgs.filter((x) => x.id !== id);
+  msgById.delete(id);
+  if (target?.image_url) await deleteStorageObject(target.image_url); // Storage容量が溜まり続けないよう画像も消す
+}
+
+// 画像だけを削除する（本文は残す）。本文が無い＝画像のみの投稿だった場合は
+// 空メッセージを残せない制約(messages_not_empty)があるため、メッセージごと削除する。
+async function deleteImageOnly(m) {
+  if (!m.image_url) return;
+  if (!m.content || !m.content.trim()) {
+    showToast('本文のない画像だけの投稿です。メッセージごと削除します');
+    return deleteMessage(m.id);
+  }
+  if (!confirm('画像だけを削除しますか？（本文は残ります）')) return;
+  const url = m.image_url;
+  const { error } = await supabase.from('messages').update({ image_url: null }).eq('id', m.id);
+  if (error) { showToast('画像を削除できませんでした: ' + error.message); return; }
+  await deleteStorageObject(url);
+  showToast('画像を削除しました');
+}
+
+// 添付画像のURLからStorage上のパスを逆算して削除する
+async function deleteStorageObject(url) {
+  const marker = `/object/public/${BUCKET}/`;
+  const i = url.indexOf(marker);
+  if (i < 0) return;
+  const path = decodeURIComponent(url.slice(i + marker.length).split('?')[0]);
+  const { error, data } = await supabase.storage.from(BUCKET).remove([path]);
+  if (error) { console.warn('画像の削除に失敗:', error.message); return; } // 本文削除自体は成功しているので致命的にはしない
+  const removedBytes = data?.[0]?.metadata?.size;
+  storageUsedBytes = Math.max(0, storageUsedBytes - (Number(removedBytes) || 0));
+  applyStorageFullState();
+}
+
+/* ============================================================
+   送信
+   ============================================================ */
+textInput.addEventListener('input', () => {
+  autoGrow(textInput);
+  updateByteCounter();
+  updateMentionBox();
+  if (textInput.value) sendTyping();
+});
+sendBtn.addEventListener('click', submit);
+textInput.addEventListener('keydown', (e) => {
+  if (mentionBox.classList.contains('open') && ['ArrowDown', 'ArrowUp', 'Enter', 'Tab', 'Escape'].includes(e.key)) {
+    if (handleMentionKey(e)) return;
+  }
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+    e.preventDefault();
+    submit();
+  } else if (e.key === 'ArrowUp' && !textInput.value && !editingId) {
+    const last = [...msgs].reverse().find((m) => m.sender_dbid === myDbid && m.content);
+    if (last) { e.preventDefault(); startEdit(last); }
+  }
+});
+
+function autoGrow(node) {
+  node.style.height = 'auto';
+  node.style.height = Math.min(node.scrollHeight, 120) + 'px';
+}
+function currentByteLength() {
+  return new TextEncoder().encode(textInput.value).length; // TextEncoder APIで実バイト数を計測
+}
+function updateByteCounter() {
+  const bytes = currentByteLength();
+  byteCounterEl.textContent = `${bytes.toLocaleString()} / ${MAX_BYTES.toLocaleString()} バイト`;
+  byteCounterEl.classList.toggle('over', bytes > MAX_BYTES);
+  sendBtn.disabled = (bytes === 0 && !pendingImage) || bytes > MAX_BYTES;
+}
+
+async function submit() {
+  if (editingId) return saveEdit();
+  return sendMessage();
+}
+
+async function saveEdit() {
+  const content = textInput.value;
+  if (!content.trim()) { showToast('本文が空です'); return; }
+  const id = editingId;
+  const { error } = await supabase.from('messages')
+    .update({ content, edited_at: new Date().toISOString() }).eq('id', id);
+  if (error) { showToast('編集を保存できませんでした: ' + error.message); return; }
+  cancelEdit();
+  showToast('編集しました');
+}
+
+async function sendMessage() {
+  const content = textInput.value;
+  if (!content.trim() && !pendingImage) return;
+  if (currentByteLength() > MAX_BYTES) { showToast('本文が大きすぎます（上限1024KB）'); return; }
+
+  const clientId = crypto.randomUUID();
+  const draft = {
+    id: 'temp-' + clientId,
+    client_id: clientId,
+    sender_dbid: myDbid,
+    sender_name: myName,
+    content,
+    reply_to: replyTo ? replyTo.id : null,
+    image_url: null,
+    created_at: new Date().toISOString(),
+    __pending: true,
+  };
+
+  // 楽観的に描画
+  appendRow(draft);
+  scrollToBottom();
+  const file = pendingImage;
+  textInput.value = '';
+  autoGrow(textInput);
+  clearPendingImage();
+  const replySnapshot = replyTo;
+  cancelReply();
+  updateByteCounter();
+
+  let imageUrl = null;
+  if (file) {
+    imageUrl = await uploadImage(file, draft);
+    if (imageUrl === false) return; // アップロード失敗（行は失敗表示に差し替え済み）
+  }
+
+  const { error } = await supabase.from('messages').insert({
+    sender_dbid: myDbid,
+    sender_name: myName,
+    content,
+    reply_to: replySnapshot ? replySnapshot.id : null,
+    image_url: imageUrl,
+    client_id: clientId,
+  });
+
+  if (error) {
+    markDraftFailed(draft, error.message);
+    return;
+  }
+  // 成功時: Realtimeが確定版を配ってくるので、そこで一時行が消える
+  setTimeout(() => {
+    const stale = messagesEl.querySelector(`[data-client-id="${cssEscape(clientId)}"].sending`);
+    if (stale) refreshSince();
+  }, 2500);
+}
+
+function markDraftFailed(draft, message) {
+  const row = messagesEl.querySelector(`[data-client-id="${cssEscape(draft.client_id)}"]`);
+  draft.__pending = false;
+  draft.__failed = true;
+  if (row) row.replaceWith(buildRow(draft));
+  showToast('送信できませんでした: ' + message);
+}
+
+async function retrySend(draft) {
+  const row = messagesEl.querySelector(`[data-client-id="${cssEscape(draft.client_id)}"]`);
+  if (row) row.remove();
+  textInput.value = draft.content || '';
+  autoGrow(textInput);
+  updateByteCounter();
+  await sendMessage();
+}
+
+/* ============================================================
+   画像の添付（Supabase Storage）
+   ============================================================ */
+$('#attach-btn').addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => {
+  if (fileInput.files[0]) setPendingImage(fileInput.files[0]);
+  fileInput.value = '';
+});
+$('#image-cancel').addEventListener('click', clearPendingImage);
+
+function setPendingImage(file) {
+  if (storageFull) { showToast('ストレージが満杯に近いため、いまは画像を送れません'); return; }
+  if (!file.type.startsWith('image/')) { showToast('画像ファイルだけ送れます'); return; }
+  if (file.size > MAX_IMAGE_BYTES) { showToast('画像は5MBまでです'); return; }
+  pendingImage = file;
+  $('#image-thumb').src = URL.createObjectURL(file);
+  $('#image-name').textContent = `${file.name}（${(file.size / 1024).toFixed(0)}KB）`;
+  $('#image-bar').classList.add('open');
+  updateByteCounter();
+}
+function clearPendingImage() {
+  pendingImage = null;
+  $('#image-bar').classList.remove('open');
+  updateByteCounter();
+}
+
+// storage_usage ビュー(schema.sql)からバケットの合計サイズを取得し、
+// 上限に近ければ添付ボタンを自動で無効化する
+async function refreshStorageUsage() {
+  const { data, error } = await supabase.from('storage_usage').select('*').maybeSingle();
+  if (error || !data) return; // ビュー未作成など。取得できない間は制限しない
+  storageUsedBytes = Number(data.total_bytes) || 0;
+  applyStorageFullState();
+}
+
+function applyStorageFullState() {
+  const wasFull = storageFull;
+  storageFull = storageUsedBytes >= (STORAGE_LIMIT_BYTES - STORAGE_SAFE_MARGIN);
+  const btn = $('#attach-btn');
+  btn.disabled = storageFull;
+  btn.title = storageFull ? 'ストレージが満杯のため画像は送れません' : '画像を送る';
+  btn.style.opacity = storageFull ? '.4' : '';
+  if (storageFull && !wasFull) {
+    showToast('ストレージが上限に近づいたため、しばらく画像を送れません');
+    if (pendingImage) clearPendingImage();
+  }
+}
+
+async function uploadImage(file, draft) {
+  const ext = (file.name.split('.').pop() || 'png').toLowerCase().slice(0, 5);
+  const path = `${myDbid}/${Date.now()}-${crypto.randomUUID().slice(0, 8)}.${ext}`;
+  const { error } = await supabase.storage.from(BUCKET).upload(path, file, {
+    cacheControl: '31536000', contentType: file.type, upsert: false,
+  });
+  if (error) {
+    markDraftFailed(draft, error.message + '（schema.sql の Storage 設定を実行してください）');
+    return false;
+  }
+  storageUsedBytes += file.size; // 次のポーリングを待たずに即座に反映
+  applyStorageFullState();
+  return supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
+}
+
+// 貼り付け・ドラッグ&ドロップからの投稿
+document.addEventListener('paste', (e) => {
+  const item = [...(e.clipboardData?.items || [])].find((i) => i.type.startsWith('image/'));
+  if (item) { setPendingImage(item.getAsFile()); if (!storageFull) showToast('画像を添付しました'); }
+});
+let dragDepth = 0;
+window.addEventListener('dragenter', (e) => {
+  if (![...(e.dataTransfer?.types || [])].includes('Files')) return;
+  dragDepth++; $('#drop-hint').classList.add('show');
+});
+window.addEventListener('dragleave', () => { if (--dragDepth <= 0) $('#drop-hint').classList.remove('show'); });
+window.addEventListener('dragover', (e) => e.preventDefault());
+window.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dragDepth = 0; $('#drop-hint').classList.remove('show');
+  const file = e.dataTransfer?.files?.[0];
+  if (file) setPendingImage(file);
+});
+
+/* ---------- ライトボックス ---------- */
+function openLightbox(url) {
+  lightbox.querySelector('img').src = url;
+  lightbox.querySelector('.lb-dl').href = url;
+  lightbox.classList.add('open');
+  history.pushState({ lightbox: true }, '');
+}
+function closeLightbox() {
+  lightbox.classList.remove('open');
+  lightbox.querySelector('img').src = '';
+}
+lightbox.addEventListener('click', (e) => { if (e.target !== lightbox.querySelector('.lb-dl')) history.back(); });
+window.addEventListener('popstate', () => { if (lightbox.classList.contains('open')) closeLightbox(); });
+
+/* ============================================================
+   メンションのオートコンプリート
+   ============================================================ */
+let mentionCandidates = [];
+let mentionIndex = 0;
+
+function currentMentionQuery() {
+  const pos = textInput.selectionStart;
+  const before = textInput.value.slice(0, pos);
+  const mt = before.match(/(?:^|\s)@([^\s@]{0,20})$/);
+  return mt ? { query: mt[1], start: pos - mt[1].length - 1, end: pos } : null;
+}
+
+function updateMentionBox() {
+  const ctx = currentMentionQuery();
+  if (!ctx) { mentionBox.classList.remove('open'); return; }
+  const q = ctx.query.toLowerCase();
+  mentionCandidates = [...knownUsers.entries()]
+    .filter(([d, u]) => d !== myDbid && u.name && u.name.toLowerCase().includes(q))
+    .sort((a, b) => Number(b[1].online) - Number(a[1].online))
+    .slice(0, 6);
+  if (!mentionCandidates.length) { mentionBox.classList.remove('open'); return; }
+  mentionIndex = 0;
+  paintMentionBox();
+  mentionBox.classList.add('open');
+}
+
+function paintMentionBox() {
+  mentionBox.textContent = '';
+  mentionCandidates.forEach(([dbid, u], i) => {
+    const item = document.createElement('div');
+    item.className = 'mention-item' + (i === mentionIndex ? ' active' : '');
+    const av = el('div', (u.name || '?').slice(0, 1).toUpperCase(), 'avatar');
+    av.style.background = u.color || colorForDbid(dbid);
+    item.appendChild(av);
+    item.appendChild(el('span', u.name));
+    if (u.online) item.appendChild(el('span', 'オンライン', 'badge'));
+    item.addEventListener('mousedown', (e) => { e.preventDefault(); applyMention(i); });
+    mentionBox.appendChild(item);
+  });
+}
+
+function handleMentionKey(e) {
+  if (e.key === 'Escape') { mentionBox.classList.remove('open'); e.preventDefault(); return true; }
+  if (e.key === 'ArrowDown') { mentionIndex = (mentionIndex + 1) % mentionCandidates.length; paintMentionBox(); e.preventDefault(); return true; }
+  if (e.key === 'ArrowUp') { mentionIndex = (mentionIndex - 1 + mentionCandidates.length) % mentionCandidates.length; paintMentionBox(); e.preventDefault(); return true; }
+  if (e.key === 'Enter' || e.key === 'Tab') { applyMention(mentionIndex); e.preventDefault(); return true; }
+  return false;
+}
+
+function applyMention(i) {
+  const ctx = currentMentionQuery();
+  const pick = mentionCandidates[i];
+  if (!ctx || !pick) return;
+  const name = pick[1].name;
+  const v = textInput.value;
+  textInput.value = v.slice(0, ctx.start) + '@' + name + ' ' + v.slice(ctx.end);
+  const caret = ctx.start + name.length + 2;
+  textInput.setSelectionRange(caret, caret);
+  mentionBox.classList.remove('open');
+  textInput.focus();
+  updateByteCounter();
+}
+
+/* ============================================================
+   検索（サーバー横断・ILIKE）
+   ============================================================ */
+$('#search-btn').addEventListener('click', toggleSearch);
+$('#search-close').addEventListener('click', closeSearch);
+searchInput.addEventListener('input', debounce(runSearch, 260));
+
+function toggleSearch() {
+  if (searchBar.classList.contains('open')) closeSearch();
+  else { searchBar.classList.add('open'); searchInput.focus(); }
+}
+function closeSearch() {
+  searchBar.classList.remove('open');
+  searchResults.classList.remove('open');
+  searchInput.value = '';
+}
+
+async function runSearch() {
+  const q = searchInput.value.trim();
+  if (q.length < 1) { searchResults.classList.remove('open'); return; }
+  const token = ++searchAbort;
+  searchResults.classList.add('open');
+  searchResults.innerHTML = '<div class="sr-empty">検索中…</div>';
+
+  const pattern = '%' + q.replace(/[%_]/g, (c) => '\\' + c) + '%';
+  const { data, error } = await supabase.from('messages').select('*')
+    .ilike('content', pattern)
+    .order('created_at', { ascending: false })
+    .limit(50);
+
+  if (token !== searchAbort) return;
+  if (error) { searchResults.innerHTML = `<div class="sr-empty">検索できませんでした<br>${escapeHtml(error.message)}</div>`; return; }
+  if (!data.length) { searchResults.innerHTML = '<div class="sr-empty">見つかりませんでした。<br>別のことばで試してみてください。</div>'; return; }
+
+  searchResults.textContent = '';
+  const head = el('div', `${data.length}件${data.length === 50 ? '以上' : ''}見つかりました`, 'sr-empty');
+  head.style.padding = '4px 4px 10px';
+  searchResults.appendChild(head);
+
+  for (const m of data) {
+    const item = document.createElement('div');
+    item.className = 'sr-item';
+    const h = document.createElement('div');
+    h.className = 'sr-head';
+    h.appendChild(el('span', m.sender_name));
+    h.appendChild(el('span', `${dayLabel(m.created_at)} ${timeLabel(m.created_at)}`));
+    item.appendChild(h);
+    const body = el('div', '', 'sr-body');
+    highlightInto(body, snippetAround(m.content, q), q);
+    item.appendChild(body);
+    item.addEventListener('click', async () => {
+      closeSearch();
+      await jumpTo(m.id);
+    });
+    searchResults.appendChild(item);
+  }
+}
+
+function snippetAround(content, q) {
+  const text = (content || '').replace(/\s+/g, ' ');
+  const i = text.toLowerCase().indexOf(q.toLowerCase());
+  if (i < 0) return text.slice(0, 120);
+  const from = Math.max(0, i - 40);
+  return (from > 0 ? '…' : '') + text.slice(from, from + 140) + (from + 140 < text.length ? '…' : '');
+}
+
+function highlightInto(target, text, q) {
+  const lower = text.toLowerCase();
+  const needle = q.toLowerCase();
+  let pos = 0;
+  while (true) {
+    const i = lower.indexOf(needle, pos);
+    if (i < 0 || !needle) break;
+    target.appendChild(document.createTextNode(text.slice(pos, i)));
+    target.appendChild(el('mark', text.slice(i, i + needle.length)));
+    pos = i + needle.length;
+  }
+  target.appendChild(document.createTextNode(text.slice(pos)));
+}
+
+function debounce(fn, ms) {
+  let t;
+  return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+}
+
+/* ============================================================
+   参加者リスト
+   ============================================================ */
+$('#members-open').addEventListener('click', openPeople);
+
+function openPeople() {
+  const sheet = openSheet('参加者');
+  const online = [], offline = [];
+  for (const [dbid, u] of knownUsers) (u.online ? online : offline).push([dbid, u]);
+  online.sort((a, b) => a[1].name.localeCompare(b[1].name, 'ja'));
+  offline.sort((a, b) => a[1].name.localeCompare(b[1].name, 'ja'));
+
+  const section = (label, list, isOnline) => {
+    if (!list.length) return;
+    sheet.appendChild(el('div', `${label}（${list.length}）`, 'group-label'));
+    const box = el('div', '', 'people-list');
+    for (const [dbid, u] of list) {
+      const p = el('div', '', 'person' + (isOnline ? ' online' : ''));
+      const av = el('div', (u.name || '?').slice(0, 1).toUpperCase(), 'avatar');
+      av.style.background = u.color || colorForDbid(dbid);
+      p.appendChild(av);
+      p.appendChild(el('span', u.name + (dbid === myDbid ? '（あなた）' : ''), 'who'));
+      p.appendChild(el('span', isOnline ? '● オンライン' : 'オフライン', 'badge'));
+      if (dbid !== myDbid) {
+        p.style.cursor = 'pointer';
+        p.addEventListener('click', () => {
+          textInput.value = (textInput.value ? textInput.value.replace(/\s*$/, ' ') : '') + '@' + u.name + ' ';
+          closeSheet();
+          textInput.focus();
+          updateByteCounter();
+        });
+      }
+      box.appendChild(p);
+    }
+    sheet.appendChild(box);
+  };
+  section('いま参加中', online, true);
+  section('過去に参加', offline, false);
+}
+
+/* ============================================================
+   設定パネル
+   ============================================================ */
+$('#settings-btn').addEventListener('click', openSettings);
+
+function openSettings() {
+  const sheet = openSheet('設定');
+
+  // --- 見た目
+  sheet.appendChild(el('label', 'テーマ'));
+  sheet.appendChild(segmented(
+    [['system', 'デバイスに合わせる'], ['light', 'ライト'], ['dark', 'ダーク']],
+    localStorage.getItem(LS.THEME) || 'system',
+    (v) => { localStorage.setItem(LS.THEME, v); applyTheme(); }
+  ));
+
+  sheet.appendChild(el('label', '文字の大きさ'));
+  sheet.appendChild(segmented(
+    [['s', '小'], ['m', '標準'], ['l', '大']],
+    localStorage.getItem(LS.FONT) || 'm',
+    (v) => { localStorage.setItem(LS.FONT, v); applyFontSize(); }
+  ));
+
+  // --- 通知
+  sheet.appendChild(el('label', 'お知らせ'));
+  const soundRow = switchRow('新着メッセージの音', localStorage.getItem(LS.SOUND) !== '0', (on) => {
+    localStorage.setItem(LS.SOUND, on ? '1' : '0');
+    if (on) playPing();
+  });
+  sheet.appendChild(soundRow);
+  const notifGranted = ('Notification' in window) && Notification.permission === 'granted';
+  const notifBtn = el('button', notifGranted ? '通知は有効です' : 'デスクトップ通知を有効にする', 'row-btn ghost');
+  notifBtn.addEventListener('click', async () => {
+    if (!('Notification' in window)) { showToast('この端末は通知に対応していません'); return; }
+    const perm = await Notification.requestPermission();
+    showToast(perm === 'granted' ? '通知を有効にしました' : '通知は許可されませんでした');
+    if (perm === 'granted') notifBtn.textContent = '通知は有効です';
+  });
+  sheet.appendChild(notifBtn);
+
+  // --- アカウント
+  sheet.appendChild(el('label', 'あなたのID（dbid）'));
+  const idBox = el('div', '', 'id-display');
+  idBox.appendChild(el('span', myDbid));
+  const copyBtn = el('button', 'コピー');
+  copyBtn.addEventListener('click', async () => {
+    await navigator.clipboard.writeText(myDbid);
+    showToast('IDをコピーしました');
+  });
+  idBox.appendChild(copyBtn);
+  sheet.appendChild(idBox);
+
+  sheet.appendChild(el('label', '表示名'));
+  const nameField = document.createElement('input');
+  nameField.type = 'text'; nameField.maxLength = 20; nameField.value = myName;
+  sheet.appendChild(nameField);
+  const renameBtn = el('button', '表示名を変える', 'row-btn primary');
+  renameBtn.addEventListener('click', async () => {
+    const newName = nameField.value.trim();
+    if (!newName || newName === myName) { closeSheet(); return; }
+    const { error } = await supabase.from('users')
+      .update({ display_name: newName, updated_at: new Date().toISOString() })
+      .eq('dbid', myDbid);
+    if (error) {
+      showToast(error.code === '23505' ? 'その表示名は使われています' : '変えられませんでした');
+      return;
+    }
+    // 過去メッセージの表示名はDBトリガー(sync_sender_name)が追従させる
+    myName = newName;
+    localStorage.setItem(LS.NAME, myName);
+    knownUsers.set(myDbid, { ...(knownUsers.get(myDbid) || {}), name: myName });
+    await trackPresence();
+    await refreshNamesLocally();
+    showToast('表示名を変えました');
+    closeSheet();
+  });
+  sheet.appendChild(renameBtn);
+
+  const regenBtn = el('button', 'IDを再発行する（別の参加者として扱われます）', 'row-btn ghost');
+  regenBtn.addEventListener('click', async () => {
+    if (!confirm('IDを再発行すると、これまでの発言は「自分の発言」として扱われなくなる場合があります。よろしいですか？')) return;
+    const newDbid = crypto.randomUUID();
+    const { error } = await supabase.from('users')
+      .update({ dbid: newDbid, avatar_color: colorForDbid(newDbid), updated_at: new Date().toISOString() })
+      .eq('dbid', myDbid);
+    if (error) { showToast('再発行できませんでした: ' + error.message); return; }
+    myDbid = newDbid;                       // ON UPDATE CASCADEで過去メッセージも追従
+    myColor = colorForDbid(newDbid);
+    localStorage.setItem(LS.DBID, myDbid);
+    closeSheet();
+    showToast('新しいIDを発行しました');
+    subscribePresence();
+    await loadLatest();
+  });
+  sheet.appendChild(regenBtn);
+
+  // --- 統計
+  sheet.appendChild(el('label', 'この部屋の記録'));
+  const grid = el('div', '', 'stat-grid');
+  const s1 = el('div', '', 'stat'); s1.appendChild(el('b', '…')); s1.appendChild(el('span', '総メッセージ'));
+  const s2 = el('div', '', 'stat'); s2.appendChild(el('b', '…')); s2.appendChild(el('span', 'あなたの発言'));
+  const s3 = el('div', '', 'stat'); s3.appendChild(el('b', String(knownUsers.size))); s3.appendChild(el('span', '参加者'));
+  grid.append(s1, s2, s3);
+  sheet.appendChild(grid);
+  (async () => {
+    const all = await supabase.from('messages').select('id', { count: 'exact', head: true });
+    const mine = await supabase.from('messages').select('id', { count: 'exact', head: true }).eq('sender_dbid', myDbid);
+    s1.querySelector('b').textContent = (all.count ?? 0).toLocaleString();
+    s2.querySelector('b').textContent = (mine.count ?? 0).toLocaleString();
+  })();
+
+  sheet.appendChild(el('label', '画像ストレージ'));
+  const storageLine = el('div', '確認中…', 'bar-text');
+  storageLine.style.marginBottom = '4px';
+  sheet.appendChild(storageLine);
+  refreshStorageUsage().then(() => {
+    const usedMB = (storageUsedBytes / (1024 * 1024)).toFixed(0);
+    const limitMB = (STORAGE_LIMIT_BYTES / (1024 * 1024)).toFixed(0);
+    storageLine.textContent = storageFull
+      ? `${usedMB}MB / ${limitMB}MB（満杯のため画像送信を停止中）`
+      : `${usedMB}MB / ${limitMB}MB`;
+  });
+
+  const leaveBtn = el('button', 'この端末のデータを消す', 'row-btn danger');
+  leaveBtn.addEventListener('click', () => {
+    if (!confirm('この端末に保存したID・表示名・設定を消して、入室画面に戻ります。サーバー上の発言は残ります。')) return;
+    Object.values(LS).forEach((k) => localStorage.removeItem(k));
+    location.reload();
+  });
+  sheet.appendChild(leaveBtn);
+}
+
+async function refreshNamesLocally() {
+  const { data } = await supabase.from('messages').select('*')
+    .in('id', msgs.map((m) => m.id).slice(0, 200));
+  for (const m of data || []) { msgById.set(m.id, m); const i = msgs.findIndex((x) => x.id === m.id); if (i >= 0) msgs[i] = m; }
+  renderAll();
+}
+
+/* ---------- シート共通 ---------- */
+let currentSheet = null;
+function openSheet(title) {
+  closeSheet();
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  const sheet = document.createElement('div');
+  sheet.className = 'modal-sheet';
+  const x = el('button', '✕', 'close-x');
+  x.setAttribute('aria-label', '閉じる');
+  x.addEventListener('click', closeSheet);
+  sheet.appendChild(x);
+  sheet.appendChild(el('h2', title));
+  overlay.appendChild(sheet);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeSheet(); });
+  document.body.appendChild(overlay);
+  currentSheet = overlay;
+  return sheet;
+}
+function closeSheet() {
+  if (currentSheet) currentSheet.remove();
+  currentSheet = null;
+}
+
+function segmented(options, value, onPick) {
+  const box = el('div', '', 'seg');
+  for (const [val, label] of options) {
+    const b = el('button', label);
+    if (val === value) b.classList.add('on');
+    b.addEventListener('click', () => {
+      box.querySelectorAll('button').forEach((n) => n.classList.remove('on'));
+      b.classList.add('on');
+      onPick(val);
+    });
+    box.appendChild(b);
+  }
+  return box;
+}
+
+function switchRow(label, on, onToggle) {
+  const row = el('div', '', 'switch-row');
+  row.appendChild(el('span', label));
+  const sw = el('div', '', 'switch' + (on ? ' on' : ''));
+  sw.setAttribute('role', 'switch');
+  sw.tabIndex = 0;
+  const flip = () => {
+    on = !on;
+    sw.classList.toggle('on', on);
+    onToggle(on);
+  };
+  sw.addEventListener('click', flip);
+  sw.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); flip(); } });
+  row.appendChild(sw);
+  return row;
+}
+
+/* ============================================================
+   通知（デスクトップ通知・音・振動）
+   ============================================================ */
+function notifyIncoming(m) {
+  const mention = mentionsMe(m.content);
+  if (mention) navigator.vibrate?.([18, 60, 18]);   // Vibration API
+  if (localStorage.getItem(LS.SOUND) !== '0' && (document.visibilityState === 'hidden' || !atBottom || mention)) {
+    playPing(mention);
+  }
+  if (document.visibilityState !== 'hidden') return; // Page Visibility API
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  const body = m.content ? (m.content.length > 60 ? m.content.slice(0, 60) + '…' : m.content) : '画像を送信しました';
+  const n = new Notification(mention ? `${m.sender_name}（あなた宛て）` : m.sender_name, { body, tag: 'line-chat' });
+  n.onclick = () => { window.focus(); n.close(); };
+}
+
+// Web Audio APIでその場で通知音を合成する（音声ファイル不要）
+function playPing(strong) {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const now = audioCtx.currentTime;
+    const notes = strong ? [880, 1174] : [988];
+    notes.forEach((freq, i) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, now + i * 0.12);
+      gain.gain.exponentialRampToValueAtTime(0.16, now + i * 0.12 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + i * 0.12 + 0.28);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(now + i * 0.12);
+      osc.stop(now + i * 0.12 + 0.3);
+    });
+  } catch (_) { /* 自動再生がブロックされている場合は無視 */ }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    unreadCount = 0;
+    updateJumpButton();
+    if (atBottom) markRead();
+    unreadBoundary = null;
+    supabase.from('users').update({ last_seen: new Date().toISOString() }).eq('dbid', myDbid).then(() => {});
+  }
+});
+
+/* ============================================================
+   キーボードショートカット
+   ============================================================ */
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); toggleSearch(); return; }
+  if (e.key === 'Escape') {
+    if (lightbox.classList.contains('open')) { history.back(); return; }
+    if (currentSheet) { closeSheet(); return; }
+    if (document.querySelector('.action-menu')) { document.querySelector('.action-menu').remove(); return; }
+    if (searchBar.classList.contains('open')) { closeSearch(); return; }
+    if (editingId) { cancelEdit(); return; }
+    if (replyTo) { cancelReply(); return; }
+    if (pendingImage) { clearPendingImage(); return; }
+  }
+});
+
+/* ============================================================
+   共通ユーティリティ
+   ============================================================ */
+function showToast(text) {
+  const t = el('div', text, 'toast');
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 2600);
+}
+
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+// 一定間隔で自分の在席を更新（他端末の既読表示・オンライン判定用）
+setInterval(() => { if (document.visibilityState === 'visible') trackPresence(); }, 45000);
+</script>
+</body>
+</html>
