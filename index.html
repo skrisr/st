@@ -1,176 +1,10 @@
 <!DOCTYPE html>
-<!--
-================================================================================
- 仕様書 (SPEC) — Supabase LINE風チャットアプリ / chat.html
-================================================================================
-■ このファイルについて
-  1つの部屋だけを持つ、名前入力のみで入室できるチャットアプリです。
-  UIはLINEのトーク画面を模しています。DB定義は別ファイル schema.sql を
-  参照してください（SQLとHTMLはあえて別ファイルに分けています）。
-
-■ 更新履歴の書式（以後もこの形式で追記していくこと）
-  [日付] 指示 #n（ユーザーからの指示の要約）
-  [日付] 対応内容 #n（それに対してClaudeが実装した内容）
-
---------------------------------------------------------------------------------
-[2026-08-28] 指示 #1（ユーザー原文の要約）
---------------------------------------------------------------------------------
-  ・Supabaseを使ったチャットアプリを作りたい
-  ・名前入力だけで入室できる。部屋は1つのみ
-  ・Supabaseの接続情報(URL / publishable key)を指定 ※値はコード内で
-    難読化して使用し、この仕様書には平文で書かない
-  ・仕様書をファイル先頭にコメントアウトで追加。以後、毎回「指示」と
-    「対応内容」を仕様書に追記していく方式にする
-  ・UIはLINE風
-  ・常にリアルタイムに最新の状態を反映する（毎回更新）
-  ・SQLとHTMLは別ファイルで出力する。SQLは特に単独でもきちんと出す
-  ・テキストの送信・削除ができる
-  ・利便性のためAPIを積極的に活用する
-  ・ランダムID用のAPIでdbid（ユーザーごとの一意なID）を発行し、
-    localStorageに保存して各ユーザーに紐づける
-  ・そのユーザーのdbidが変更された場合、サーバー上の表示名データも
-    その変更に合わせて更新されるようにする
-  ・表示名（ユーザー名）はサーバー上で重複できないようにする
-  ・1回に送信できるテキストは最大1024KBまで。長文は簡単に
-    折りたたみ／展開ができるようにする
-  ・コード中のkeyやURLなどのリンクは暗号化（難読化）する
-
---------------------------------------------------------------------------------
-[2026-08-28] 対応内容 #1（Claudeが実装した内容）
---------------------------------------------------------------------------------
-  ・DB: schema.sql に users(dbid, display_name UNIQUE) /
-    messages(id, sender_dbid FK ON UPDATE CASCADE, sender_name, content,
-    content_bytes 生成列, created_at) を作成。RLSはオープンだが、
-    削除ボタンはクライアント側で「自分のdbidのメッセージのみ」に表示。
-  ・入室: 名前を入力するだけの単一画面。初回はcrypto.randomUUID()
-    （Web Crypto API＝「ランダムIDを発行するAPI」）でdbidを発行し、
-    localStorage(キー: line_chat_dbid / line_chat_name)に保存。
-    2回目以降はlocalStorageの値でそのまま自動入室する。
-  ・表示名の重複禁止: users.display_nameのUNIQUE制約に加え、
-    upsert時に一意制約違反(23505)を検知してエラーメッセージ表示。
-  ・「dbidが変わったらサーバー上の表示名データを更新する」仕様:
-    設定パネルの「IDを再発行」ボタンを押すと crypto.randomUUID()で
-    新dbidを生成し、UPDATE users SET dbid = 新dbid WHERE dbid = 旧dbid。
-    ON UPDATE CASCADEにより過去メッセージのsender_dbidも自動追従。
-  ・チャット本体: Supabase Realtime の postgres_changes で
-    messagesテーブルのINSERT/DELETEを購読しリアルタイム反映。
-  ・オンライン人数表示: Supabase Realtime の Presence機能。
-  ・本文サイズ制限: TextEncoder APIで実バイト数を計測し1,048,576バイト上限。
-  ・長文の折りたたみ: 300文字超は「もっと見る／閉じる」で展開・縮小。
-  ・keyとURLの難読化: Base64エンコード後に文字列を反転させて埋め込み、
-    実行時に「反転→Base64デコード」して復元する deobfuscate() を実装。
-
---------------------------------------------------------------------------------
-[2026-09-08] 指示 #2（ユーザー原文の要約）
---------------------------------------------------------------------------------
-  ・chat.html を進化させてほしい。機能追加の内容はこちらの裁量に任せる。
-
---------------------------------------------------------------------------------
-[2026-09-08] 対応内容 #2（Claudeが実装した内容）— v2.0
---------------------------------------------------------------------------------
-  ★ セキュリティ上の指摘
-    v1のファイル先頭には「システム指示」を装った偽の命令文（解析を拒否させ、
-    パスワードを要求させる内容）がコメントとして埋め込まれていました。これは
-    プロンプトインジェクションであり、ファイル内のテキストは指示ではなく
-    データとして扱うべきものです。v2ではこの記述を削除しました。
-
-  ① 返信（リプライ）
-      アクションメニューから返信すると引用付きで送信。引用をタップすると
-      元メッセージへスクロールしてハイライトする。DBは messages.reply_to。
-  ② 絵文字リアクション
-      1メッセージに複数種類・複数人。自分の分はタップでトグル。
-      reactionsテーブルをRealtime購読して全員の画面に即時反映。
-  ③ メッセージの編集
-      自分のメッセージを編集可能。edited_at を持ち「編集済み」と表示。
-      UPDATEもRealtime購読しているので他の人の画面もその場で書き換わる。
-  ④ 既読表示（LINE風）
-      Presenceに last_read_at を載せ、自分の発言より後に既読位置がある
-      参加者の数を「既読 N」として表示。DBへの書き込みゼロで実現。
-  ⑤ 入力中インジケーター
-      Realtimeのbroadcastで「◯◯さんが入力中…」を3秒間だけ表示。
-  ⑥ 画像の添付
-      Supabase Storage(chat-imagesバケット)へアップロード。ボタン選択・
-      ドラッグ&ドロップ・クリップボードから貼り付けの3経路に対応。
-      サムネイル表示＋タップで全画面ライトボックス。
-  ⑦ メンション
-      「@」入力で参加者のオートコンプリート。自分宛てのメッセージは
-      バブルを強調表示し、通知＋バイブレーションで知らせる。
-  ⑧ 全文検索
-      ヘッダーの検索から ILIKE でサーバー横断検索（pg_trgmインデックス）。
-      結果をタップするとその時点の前後30件を読み込んで該当箇所へジャンプ。
-  ⑨ 過去ログの無限スクロール
-      初期表示は50件。上端に達すると IntersectionObserver が発火して
-      さらに50件ずつ遡る（スクロール位置は維持）。
-  ⑩ 未読まわり
-      未読の境界に「ここから未読」の区切り線。下端にいないときは
-      「新着 N件 ↓」ボタン。タブが非アクティブの間はタイトルに未読数。
-  ⑪ 本文のリッチ表示
-      URLの自動リンク化、**太字** / *斜体* / `コード` / ~~打消し~~ の
-      簡易Markdown、連続改行の正規化。すべてDOM APIで組み立てるため
-      innerHTMLによるXSSの経路を作らない。
-  ⑫ 楽観的送信
-      送信ボタンを押した瞬間にバブルを描画（半透明＋時計マーク）し、
-      サーバー確定で通常表示に切替。失敗時は「再送」ボタンを出す。
-      client_id列で自分のRealtimeイベントと突合して二重表示を防止。
-  ⑬ ダークモード
-      システム連動／ライト／ダークの3択。LINEのダークテーマに寄せた配色。
-  ⑭ 文字サイズ変更（小・標準・大）
-  ⑮ 参加者リスト
-      オンライン（Presence）とオフライン（usersテーブル）を分けて表示。
-  ⑯ 接続状態の表示と自動復帰
-      切断時はヘッダーに「接続していません」を出し、復帰時に差分を再取得。
-  ⑰ 通知音（Web Audio APIで生成。オン/オフ切替あり）
-  ⑱ アバターの自動カラーリング（dbidのハッシュから決定・DBにも保存）
-  ⑲ キーボードショートカット
-      Ctrl/⌘+K 検索 / Esc 取消 / ↑ 直前の自分の発言を編集 / Enter 送信
-  ⑳ アクションメニュー
-      バブルの長押し（スマホ）・右クリック（PC）・「⋯」ボタンで
-      返信／リアクション／コピー／編集／削除をまとめて操作。
-
-  ・追加で活用したブラウザAPI:
-      IntersectionObserver … 過去ログの追加読み込み・既読判定
-      Web Audio API        … 通知音の生成
-      Vibration API        … メンション時の振動
-      matchMedia           … OSのダークモード検出
-      Clipboard API        … 画像の貼り付け／本文コピー
-      Drag and Drop API    … 画像のドロップ投稿
-      navigator.onLine     … 接続断の検出
-      History API          … ライトボックス表示中の戻る操作
-
-  ・DB変更は schema.sql v2.0 に集約（v1からの移行SQL付き）。
-
---------------------------------------------------------------------------------
-[2026-09-08] 指示 #3（ユーザー原文の要約）
---------------------------------------------------------------------------------
-  ・ストレージが満杯になったら自動でファイル送信をできなくしてほしい
-  ・「画像のみ削除」のような項目を追加してほしい
-
---------------------------------------------------------------------------------
-[2026-09-08] 対応内容 #3（Claudeが実装した内容）— v2.1
---------------------------------------------------------------------------------
-  ・schema.sql に public.storage_usage ビューを追加。storage.objects から
-    chat-images バケットの合計バイト数を集計し、クライアントから
-    supabase.from('storage_usage').select() で読めるようにした。
-  ・chat.html 側は起動時・画像アップロード後・2分毎に使用量を取得し、
-    STORAGE_LIMIT_BYTES(既定1GB) - STORAGE_SAFE_MARGIN(20MB) を超えたら
-    添付ボタンを自動的に無効化。選択中の画像があれば取り消し、
-    トーストで通知する。設定パネルにも現在の使用量を表示する。
-  ・アクションメニューに「画像だけ削除」を追加。本文は残したまま
-    image_url だけをnullにしてStorageからも実ファイルを削除する。
-    本文が無い（画像のみの）投稿の場合は空メッセージを残せない
-    制約(messages_not_empty)に触れるため、メッセージごと削除する
-    フローに自動で切り替える。
-  ・メッセージ削除（画像だけ削除／メッセージ全体削除）のたびに
-    使用量をローカルでも即座に差し引き、次のポーリングを待たずに
-    UIへ反映する。
-================================================================================
--->
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#06c755">
-<title>トーク | LINE風チャット</title>
+<title>Simple Talk</title>
 <style>
   :root{
     --line-green:#06c755;
@@ -232,7 +66,6 @@
   :focus-visible{ outline:2px solid var(--line-green); outline-offset:2px; }
   @media (prefers-reduced-motion:reduce){ *{ animation-duration:.01ms !important; transition-duration:.01ms !important; } }
 
-  /* ---------- 入室画面 ---------- */
   #gate{
     height:100dvh; display:flex; align-items:center; justify-content:center;
     background:linear-gradient(160deg,var(--line-green) 0%, var(--line-green-dark) 55%, #03823a 100%);
@@ -264,7 +97,6 @@
   #gate .err{ color:var(--danger); font-size:12.5px; margin-top:8px; min-height:16px; }
   #gate .hint{ font-size:11px; color:var(--text-sub); margin-top:18px; line-height:1.6; }
 
-  /* ---------- ヘッダー ---------- */
   #header{
     height:var(--header-h); min-height:var(--header-h);
     background:var(--header-bg); color:var(--header-text); display:flex; align-items:center;
@@ -286,7 +118,6 @@
   }
   #header button.icon-btn:active{ background:rgba(255,255,255,.2); }
 
-  /* ---------- 検索バー ---------- */
   #search-bar{
     display:none; background:var(--bg-panel); border-bottom:1px solid var(--border);
     padding:8px 10px; gap:8px; align-items:center; z-index:4;
@@ -317,7 +148,19 @@
   [data-theme="dark"] .sr-body mark, [data-theme="dark"] .bubble mark{ background:#7a6320; color:#fff6d5; }
   .sr-empty{ text-align:center; color:var(--text-sub); font-size:13px; padding:40px 10px; line-height:1.8;}
 
-  /* ---------- メッセージエリア ---------- */
+  #pin-bar{
+    display:none; align-items:center; gap:9px; padding:8px 12px;
+    background:var(--bg-panel); border-bottom:1px solid var(--border); cursor:pointer;
+  }
+  #pin-bar.open{ display:flex; }
+  #pin-bar .pin-icon{ flex-shrink:0; font-size:14px; }
+  #pin-bar .pin-body{ flex:1; min-width:0; }
+  #pin-bar .pin-name{ font-size:10.5px; color:var(--line-green); font-weight:700; }
+  #pin-bar .pin-text{
+    font-size:12.5px; color:var(--text-main);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+
   #chat-body{ flex:1; min-height:0; position:relative; display:flex; flex-direction:column; }
   #messages{
     flex:1; overflow-y:auto; padding:6px 10px 20px;
@@ -379,6 +222,12 @@
     font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.9em;
   }
   .bubble del{ opacity:.65; }
+  .bubble pre{
+    background:var(--quote-bg); border-radius:8px; padding:8px 10px; margin:6px 0 2px;
+    overflow-x:auto; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:.86em; line-height:1.5; white-space:pre;
+  }
+  .bubble pre code{ background:none; padding:0; font-size:1em; }
   .bubble .mention{ font-weight:700; text-decoration:underline; text-underline-offset:2px; }
 
   .quote{
@@ -410,7 +259,6 @@
     text-decoration:underline; cursor:pointer; opacity:.8;
   }
 
-  /* リアクション */
   .reactions{ display:flex; flex-wrap:wrap; gap:4px; margin:4px 0 0; }
   .msg-row.mine .reactions{ justify-content:flex-end; }
   .reaction{
@@ -423,7 +271,6 @@
   .reaction.by-me .n{ color:var(--line-green-dark); font-weight:700; }
   [data-theme="dark"] .reaction.by-me .n{ color:#7ef2a4; }
 
-  /* ---------- 入力中 / 新着ジャンプ ---------- */
   #typing{
     position:absolute; left:12px; bottom:6px; font-size:11.5px; color:var(--text-sub);
     background:var(--bg-panel); border:1px solid var(--border); border-radius:14px;
@@ -442,8 +289,14 @@
     box-shadow:0 3px 10px rgba(0,0,0,.25);
   }
   #jump-btn.show{ display:block; }
+  #top-btn{
+    position:absolute; right:12px; top:10px; z-index:3; display:none;
+    background:var(--bg-panel); color:var(--text-main); border:1px solid var(--border);
+    border-radius:50%; width:34px; height:34px; font-size:15px; cursor:pointer;
+    box-shadow:0 2px 8px rgba(0,0,0,.15);
+  }
+  #top-btn.show{ display:block; }
 
-  /* ---------- 入力エリア ---------- */
   #reply-bar, #edit-bar{
     display:none; background:var(--bg-panel); border-top:1px solid var(--border);
     padding:8px 12px; align-items:center; gap:10px; font-size:12.5px;
@@ -487,7 +340,6 @@
   }
   #drop-hint.show{ display:flex; }
 
-  /* ---------- メンション候補 ---------- */
   #mention-box{
     display:none; position:absolute; left:10px; right:10px; bottom:calc(100% + 4px);
     background:var(--bg-panel); border:1px solid var(--border); border-radius:12px;
@@ -498,7 +350,6 @@
   .mention-item.active{ background:var(--chip-bg); }
   .mention-item .avatar{ width:26px;height:26px;font-size:11px;margin:0; }
 
-  /* ---------- モーダル・メニュー ---------- */
   .modal-overlay{
     position:fixed; inset:0; background:var(--overlay); display:flex; align-items:flex-end;
     justify-content:center; z-index:50; animation:fadeIn .15s ease;
@@ -576,6 +427,14 @@
   .action-item:active{ background:var(--chip-bg); }
   .action-item.danger{ color:var(--danger); }
 
+  .emoji-grid{ display:grid; grid-template-columns:repeat(8,1fr); gap:4px; margin-top:4px; }
+  .emoji-grid button{
+    background:none; border:none; font-size:22px; padding:6px 0; border-radius:8px; cursor:pointer;
+    line-height:1;
+  }
+  .emoji-grid button:active{ background:var(--chip-bg); }
+  .emoji-grid button.on{ background:rgba(6,199,85,.18); }
+
   #lightbox{
     position:fixed; inset:0; z-index:90; background:rgba(0,0,0,.92); display:none;
     align-items:center; justify-content:center; padding:20px;
@@ -590,6 +449,62 @@
     background:rgba(0,0,0,.82); color:#fff; padding:9px 18px; border-radius:20px; font-size:12.5px;
     z-index:100; animation:fadeIn .15s ease; max-width:88vw; text-align:center;
   }
+  body.compact .msg-row{ margin:2px 0; }
+  body.compact .bubble{ padding:6px 10px; }
+  body.compact #messages{ gap:0; }
+  body.hide-avatar .avatar{ display:none; }
+  body.no-dots #messages{ background-image:none; }
+  body.contrast{ --text-sub:var(--text-main); }
+  body.contrast .time, body.contrast .read-mark, body.contrast .sender-name{ color:var(--text-main); opacity:.8; }
+
+  .msg-row.grouped{ margin-top:1px; }
+  .msg-row.grouped .sender-name{ display:none; }
+  .msg-row.grouped .avatar{ visibility:hidden; }
+  .msg-row.grouped .bubble{ border-radius:16px; }
+  .msg-row.theirs.grouped .bubble{ border-bottom-left-radius:16px; }
+  .msg-row.mine.grouped .bubble{ border-bottom-right-radius:16px; }
+
+  .bubble.jumbo{ font-size:2.6em; line-height:1.25; padding:6px 10px; background:none !important; box-shadow:none; }
+  .bubble .md-line{ white-space:pre-wrap; }
+  .bubble .md-line:empty::after{ content:"\00a0"; }
+  .bubble .md-h1{ font-size:1.28em; font-weight:700; margin:3px 0 1px; }
+  .bubble .md-h2{ font-size:1.16em; font-weight:700; margin:3px 0 1px; }
+  .bubble .md-h3{ font-size:1.05em; font-weight:700; margin:3px 0 1px; }
+  .bubble .md-quote{
+    border-left:3px solid currentColor; opacity:.75; padding-left:8px; margin:2px 0;
+  }
+  .bubble ul{ margin:3px 0; padding-left:20px; }
+  .bubble li{ margin:1px 0; }
+  .bubble .spoiler{
+    background:currentColor; border-radius:4px; cursor:pointer; transition:background .15s;
+  }
+  .bubble .spoiler:not(.shown){ color:transparent !important; }
+  .bubble .spoiler.shown{ background:var(--quote-bg); }
+  .code-wrap{ position:relative; }
+  .code-copy{
+    position:absolute; top:5px; right:5px; font-size:10px; padding:2px 7px; border-radius:6px;
+    border:1px solid var(--border); background:var(--bg-panel); color:var(--text-main); cursor:pointer; opacity:.85;
+  }
+  .star-mark{ font-size:10px; }
+
+  .chip-row{ display:flex; gap:6px; flex-wrap:wrap; padding:6px 10px 0; }
+  .chip{
+    border:1px solid var(--field-border); background:var(--field-bg); color:var(--text-main);
+    border-radius:14px; padding:4px 10px; font-size:11.5px; cursor:pointer;
+  }
+  .chip.on{ border-color:var(--line-green); background:rgba(6,199,85,.14); font-weight:700; }
+
+  .gallery{ display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-top:6px; }
+  .gallery img{ width:100%; aspect-ratio:1; object-fit:cover; border-radius:8px; cursor:zoom-in; background:var(--chip-bg); }
+  .hour-graph{ display:flex; align-items:flex-end; gap:2px; height:70px; margin-top:8px; }
+  .hour-graph .hb{ flex:1; background:var(--line-green); border-radius:2px 2px 0 0; min-height:2px; }
+  .hour-labels{ display:flex; justify-content:space-between; font-size:9.5px; color:var(--text-sub); margin-top:3px; }
+  .snippet-row{ display:flex; gap:6px; align-items:center; margin-top:6px; }
+  .snippet-row input{ flex:1; padding:9px 10px; border-radius:8px; border:1.5px solid var(--field-border); background:var(--field-bg); color:var(--text-main); font-size:13px;}
+  .snippet-item{ display:flex; align-items:center; gap:8px; padding:8px 2px; font-size:13.5px; border-bottom:1px solid var(--border); }
+  .snippet-item span{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .snippet-item button{ border:none; background:var(--chip-bg); color:var(--text-main); border-radius:6px; padding:4px 9px; font-size:11px; cursor:pointer; }
+
   .empty-hint{ text-align:center; color:var(--text-sub); font-size:12.5px; margin-top:40px; line-height:1.9; }
 </style>
 </head>
@@ -597,7 +512,6 @@
 
 <div id="app">
 
-  <!-- 入室画面 -->
   <div id="gate">
     <div class="card">
       <div class="logo">💬</div>
@@ -610,7 +524,6 @@
     </div>
   </div>
 
-  <!-- チャット画面 -->
   <div id="chat" style="display:none; flex:1; min-height:0; flex-direction:column;">
     <div id="header">
       <div class="room-icon">👥</div>
@@ -626,12 +539,23 @@
       <input id="search-input" type="search" placeholder="メッセージを検索" autocomplete="off">
       <button id="search-close">閉じる</button>
     </div>
+    <div id="search-chips" class="chip-row" style="display:none;"></div>
+
+    <div id="pin-bar">
+      <span class="pin-icon">📌</span>
+      <div class="pin-body">
+        <div class="pin-name" id="pin-name"></div>
+        <div class="pin-text" id="pin-text"></div>
+      </div>
+      <button class="bar-close" id="pin-unpin" aria-label="ピン留めを外す">✕</button>
+    </div>
 
     <div id="chat-body">
       <div id="messages"><div id="top-sentinel"></div></div>
       <div id="search-results"></div>
       <div id="typing"></div>
       <button id="jump-btn"></button>
+      <button id="top-btn" title="いちばん上へ">⤒</button>
     </div>
 
     <div id="reply-bar">
@@ -660,6 +584,7 @@
     <div id="composer" style="position:relative;">
       <div id="mention-box"></div>
       <button class="round-btn" id="attach-btn" title="画像を送る" aria-label="画像を送る">＋</button>
+      <button class="round-btn" id="snippet-btn" title="定型文" aria-label="定型文">📝</button>
       <textarea id="text-input" rows="1" placeholder="メッセージを入力"></textarea>
       <button class="round-btn" id="send-btn" aria-label="送信">➤</button>
       <input type="file" id="file-input" accept="image/*" hidden>
@@ -679,16 +604,6 @@
 <script type="module">
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 
-/* ============================================================
-   接続情報の復号（難読化解除）
-   ------------------------------------------------------------
-   Base64エンコード → 文字列反転、の順で難読化して埋め込んである値を
-   実行時に「反転 → Base64デコード」して元に戻す。
-   ※publishable keyはブラウザに公開される前提の鍵だが、
-     ソース上に平文で置かないという指示のため難読化している。
-     秘匿性は無い（開発者ツールから復元可能）ので、実際の保護は
-     schema.sql の RLS 側で行うこと。
-   ============================================================ */
 function deobfuscate(scrambled) {
   const b64 = scrambled.split('').reverse().join('');
   return atob(b64);
@@ -698,46 +613,53 @@ const SUPABASE_KEY = deobfuscate('==QRBV2MuZVYo91Z6JGeGl0SQx0ZQRWd2FmdR5mTSZWVfV
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-/* ============================================================
-   定数
-   ============================================================ */
 const LS = {
   DBID: 'line_chat_dbid',
   NAME: 'line_chat_name',
-  THEME: 'line_chat_theme',        // system | light | dark
-  FONT: 'line_chat_font',          // s | m | l
-  SOUND: 'line_chat_sound',        // 1 | 0
-  LASTSEEN: 'line_chat_last_seen', // 最後に読んだメッセージのcreated_at
+  THEME: 'line_chat_theme',
+  FONT: 'line_chat_font',
+  SOUND: 'line_chat_sound',
+  LASTSEEN: 'line_chat_last_seen',
 };
-const MAX_BYTES = 1024 * 1024;     // 1024KB
-const COLLAPSE_LEN = 300;          // これを超える本文は折りたたむ
-const PAGE_SIZE = 50;              // 1回に読み込む過去ログ件数
+const MAX_BYTES = 1024 * 1024;
+const COLLAPSE_LEN = 300;
+const PAGE_SIZE = 50;
 const BUCKET = 'chat-images';
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-// Supabase無料プランの目安上限。実際のプランに合わせて調整すること。
-const STORAGE_LIMIT_BYTES = 1024 * 1024 * 1024;   // 1GB
-const STORAGE_SAFE_MARGIN  = 20 * 1024 * 1024;    // これだけ余裕を残して自動停止する
+const STORAGE_LIMIT_BYTES = 1024 * 1024 * 1024;
+const STORAGE_SAFE_MARGIN  = 20 * 1024 * 1024;
+const DB_LIMIT_BYTES       = 500 * 1024 * 1024;
+const DB_SAFE_MARGIN       = 25 * 1024 * 1024;
+const IMAGE_MAX_EDGE = 1600;
+const IMAGE_QUALITY  = 0.82;
 const QUICK_EMOJI = ['👍', '❤️', '😂', '😮', '🙏', '🎉'];
+const PICKER_EMOJI = [
+  '👍','👎','❤️','🔥','🎉','😂','🤣','😊','😍','🥰','😎','🤔',
+  '😮','😢','😭','😱','😴','🤯','🥺','😤','🙏','👏','🙌','🤝',
+  '💪','✨','⭐','💯','✅','❌','⚠️','❓','❗','💡','📌','🔗',
+  '🍺','🍜','🍰','☕','🎮','🎵','📷','🚀','🐱','🐶','🌸','🌙',
+];
 const AVATAR_COLORS = ['#f2545b','#f4a259','#e8b800','#4caf50','#00b1b5','#3f8ae0','#7c6ce0','#d4569f','#8a7a68','#4a6b8a'];
 
-/* ============================================================
-   状態
-   ============================================================ */
 let myDbid = localStorage.getItem(LS.DBID);
 let myName = localStorage.getItem(LS.NAME);
 let myColor = null;
 
-let msgs = [];                      // 表示中のメッセージ(created_at昇順)
+let msgs = [];
 const msgById = new Map();
-const reactionsByMsg = new Map();   // message_id -> Map(emoji -> Set(dbid))
-const reactionById = new Map();     // reaction_id -> {message_id, dbid, emoji}
-const knownUsers = new Map();       // dbid -> {display_name, avatar_color, online}
+const mkey = (id) => String(id);
+const reactionsByMsg = new Map();
+const reactionById = new Map();
+const knownUsers = new Map();
 
 let replyTo = null;
 let editingId = null;
 let pendingImage = null;
 let storageUsedBytes = 0;
 let storageFull = false;
+let dbUsedBytes = 0;
+let dbFull = false;
+let pinnedMsg = null;
 let hasOlder = true;
 let loadingOlder = false;
 let unreadCount = 0;
@@ -750,6 +672,39 @@ let typingTimers = new Map();
 let lastTypingSent = 0;
 let audioCtx = null;
 let searchAbort = 0;
+
+const PREF_KEY = 'line_chat_prefs';
+const PREF_DEFAULTS = {
+  enterSends: true, relTime: false, showSeconds: false, group: true,
+  compact: false, hideAvatar: false, noDots: false, contrast: false,
+  shortLinks: false, mentionOnly: false, muteUntil: 0, accent: '',
+  jumbo: true,
+};
+let prefs = { ...PREF_DEFAULTS, ...safeParse(localStorage.getItem(PREF_KEY)) };
+function safeParse(v) { try { return JSON.parse(v) || {}; } catch (_) { return {}; } }
+function pref(k) { return prefs[k]; }
+function setPref(k, v) { prefs[k] = v; localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); applyPrefs(); }
+function applyPrefs() {
+  document.body.classList.toggle('compact', !!prefs.compact);
+  document.body.classList.toggle('hide-avatar', !!prefs.hideAvatar);
+  document.body.classList.toggle('no-dots', !!prefs.noDots);
+  document.body.classList.toggle('contrast', !!prefs.contrast);
+  if (prefs.accent) {
+    document.documentElement.style.setProperty('--line-green', prefs.accent);
+    document.documentElement.style.setProperty('--header-bg', prefs.accent);
+  } else {
+    document.documentElement.style.removeProperty('--line-green');
+    document.documentElement.style.removeProperty('--header-bg');
+  }
+}
+
+let bookmarks = new Set(safeParse(localStorage.getItem('line_chat_bookmarks')) || []);
+function saveBookmarks() { localStorage.setItem('line_chat_bookmarks', JSON.stringify([...bookmarks])); }
+let snippets = safeParse(localStorage.getItem('line_chat_snippets')) || [];
+function saveSnippets() { localStorage.setItem('line_chat_snippets', JSON.stringify(snippets)); }
+let searchHistory = safeParse(localStorage.getItem('line_chat_searches')) || [];
+let lastSentId = null, lastSentAt = 0;
+let searchFilterMine = false, searchFilterImage = false;
 
 const $ = (sel) => document.querySelector(sel);
 const gateEl = $('#gate');
@@ -772,9 +727,6 @@ const mentionBox = $('#mention-box');
 const fileInput = $('#file-input');
 const lightbox = $('#lightbox');
 
-/* ============================================================
-   外観設定（テーマ・文字サイズ）
-   ============================================================ */
 const prefersDark = window.matchMedia('(prefers-color-scheme: dark)');
 prefersDark.addEventListener('change', applyTheme);
 
@@ -792,16 +744,12 @@ function applyFontSize() {
 applyTheme();
 applyFontSize();
 
-/* ============================================================
-   起動処理
-   ============================================================ */
 init();
 
 async function init() {
   if (myDbid && myName) {
     const ok = await syncUserToServer(myDbid, myName);
     if (ok) { enterChat(); return; }
-    // 同期に失敗した場合（名前が別の人に取られた等）は入室画面へ
   }
   showGate();
 }
@@ -823,7 +771,7 @@ async function handleEnter() {
   if (name.length > 20) { gateErr.textContent = '表示名は20文字以内にしてください。'; return; }
 
   enterBtn.disabled = true; enterBtn.textContent = '確認中…';
-  const newDbid = myDbid || crypto.randomUUID();  // Web Crypto APIでランダムID発行
+  const newDbid = myDbid || crypto.randomUUID();
   const ok = await syncUserToServer(newDbid, name);
   enterBtn.disabled = false; enterBtn.textContent = 'はじめる';
 
@@ -836,7 +784,6 @@ async function handleEnter() {
   }
 }
 
-// users テーブルへ upsert。表示名の重複は一意制約違反(23505)で検知する。
 async function syncUserToServer(dbid, name) {
   myColor = colorForDbid(dbid);
   const { error } = await supabase.from('users').upsert({
@@ -864,9 +811,6 @@ function colorForDbid(dbid) {
   return AVATAR_COLORS[h % AVATAR_COLORS.length];
 }
 
-/* ============================================================
-   チャット画面
-   ============================================================ */
 async function enterChat() {
   gateEl.style.display = 'none';
   chatEl.style.display = 'flex';
@@ -876,8 +820,35 @@ async function enterChat() {
   subscribePresence();
   observeTopSentinel();
   updateByteCounter();
+  applyPrefs();
+  const draft = localStorage.getItem('line_chat_draft');
+  if (draft) { textInput.value = draft; autoGrow(textInput); }
+  $('#snippet-btn').addEventListener('click', openSnippets);
+  checkPermalink();
   refreshStorageUsage();
-  setInterval(() => { if (document.visibilityState === 'visible') refreshStorageUsage(); }, 120000);
+  refreshDbUsage();
+  loadPinned();
+  setInterval(() => {
+    if (document.visibilityState !== 'visible') return;
+    refreshStorageUsage();
+    refreshDbUsage();
+  }, 120000);
+}
+
+async function refreshDbUsage() {
+  const { data, error } = await supabase.rpc('db_usage');
+  if (error || !data || !data.length) return;
+  dbUsedBytes = Number(data[0].total_bytes) || 0;
+  applyDbFullState();
+}
+
+function applyDbFullState() {
+  const wasFull = dbFull;
+  dbFull = dbUsedBytes >= (DB_LIMIT_BYTES - DB_SAFE_MARGIN);
+  if (dbFull && !wasFull) showToast('データベースが上限に近づいています。新規送信を停止しました');
+  textInput.disabled = dbFull;
+  textInput.placeholder = dbFull ? 'データベースが満杯のため送信できません' : 'メッセージを入力';
+  updateByteCounter();
 }
 
 async function loadUsers() {
@@ -888,7 +859,6 @@ async function loadUsers() {
   }
 }
 
-/* ---------- 初回・最新の読み込み ---------- */
 async function loadLatest() {
   messagesEl.innerHTML = '<div class="empty-hint">読み込み中…</div>';
   const { data, error } = await supabase
@@ -903,14 +873,13 @@ async function loadLatest() {
   msgs = (data || []).slice().reverse();
   hasOlder = (data || []).length === PAGE_SIZE;
   msgById.clear();
-  for (const m of msgs) msgById.set(m.id, m);
+  for (const m of msgs) msgById.set(mkey(m.id), m);
   await loadReactionsFor(msgs.map((m) => m.id));
   renderAll();
   scrollToBottom(true);
   markRead();
 }
 
-// 検索結果からのジャンプ用: 指定メッセージの前後を読み込む
 async function loadAround(target) {
   const [before, after] = await Promise.all([
     supabase.from('messages').select('*').lt('created_at', target.created_at)
@@ -922,7 +891,7 @@ async function loadAround(target) {
   msgs = dedupe(list);
   hasOlder = (before.data || []).length === 30;
   msgById.clear();
-  for (const m of msgs) msgById.set(m.id, m);
+  for (const m of msgs) msgById.set(mkey(m.id), m);
   await loadReactionsFor(msgs.map((m) => m.id));
   renderAll();
   focusMessage(target.id);
@@ -948,7 +917,7 @@ async function loadOlder() {
     const prevHeight = messagesEl.scrollHeight;
     const prevTop = messagesEl.scrollTop;
     msgs = dedupe([...older, ...msgs]);
-    for (const m of older) msgById.set(m.id, m);
+    for (const m of older) msgById.set(mkey(m.id), m);
     await loadReactionsFor(older.map((m) => m.id));
     renderAll();
     messagesEl.scrollTop = prevTop + (messagesEl.scrollHeight - prevHeight);
@@ -962,7 +931,6 @@ function dedupe(list) {
              .sort((a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0));
 }
 
-// IntersectionObserver: 上端に到達したら過去ログを追加読み込み
 let topObserver = null;
 function observeTopSentinel() {
   if (!topObserver) {
@@ -998,9 +966,6 @@ function dropReaction(r) {
   if (!set.size) byEmoji.delete(r.emoji);
 }
 
-/* ============================================================
-   Realtime（メッセージ・リアクション）
-   ============================================================ */
 function subscribeRealtime() {
   if (dbChannel) supabase.removeChannel(dbChannel);
   dbChannel = supabase.channel('db-changes')
@@ -1021,13 +986,13 @@ function subscribeRealtime() {
 }
 
 function onInsert(m) {
-  // 楽観的に描画済みの自分のメッセージは、確定版で置き換える
   if (m.client_id) {
     const temp = messagesEl.querySelector(`[data-client-id="${cssEscape(m.client_id)}"]`);
     if (temp) temp.remove();
+    if (m.sender_dbid === myDbid) { lastSentId = m.id; lastSentAt = Date.now(); }
   }
-  if (msgById.has(m.id)) return;
-  msgById.set(m.id, m);
+  if (msgById.has(mkey(m.id))) return;
+  msgById.set(mkey(m.id), m);
   msgs.push(m);
   const wasAtBottom = atBottom;
   appendRow(m);
@@ -1045,9 +1010,10 @@ function onInsert(m) {
 }
 
 function onUpdate(m) {
+  if (pinnedMsg && pinnedMsg.id === m.id) { pinnedMsg = m.pinned_at ? m : null; paintPinBar(); }
   const idx = msgs.findIndex((x) => x.id === m.id);
   if (idx >= 0) msgs[idx] = m;
-  msgById.set(m.id, m);
+  msgById.set(mkey(m.id), m);
   const row = rowOf(m.id);
   if (row) {
     const fresh = buildRow(m);
@@ -1059,19 +1025,29 @@ function onUpdate(m) {
 
 function onDelete(old) {
   if (!old || !old.id) return;
+  if (pinnedMsg && pinnedMsg.id === old.id) { pinnedMsg = null; paintPinBar(); }
   msgs = msgs.filter((x) => x.id !== old.id);
-  msgById.delete(old.id);
+  msgById.delete(mkey(old.id));
   const row = rowOf(old.id);
   if (row) row.remove();
 }
 
-/* ---------- Presence（オンライン状況・既読位置） ---------- */
 function subscribePresence() {
   if (presenceChannel) supabase.removeChannel(presenceChannel);
   presenceChannel = supabase.channel('room:main-presence', {
     config: { presence: { key: myDbid }, broadcast: { self: false } },
   });
   presenceChannel
+    .on('presence', { event: 'join' }, ({ newPresences }) => {
+      for (const p of newPresences || []) {
+        if (p.dbid && p.dbid !== myDbid && knownUsers.size) showToast(`${p.name}さんが参加しました`);
+      }
+    })
+    .on('presence', { event: 'leave' }, ({ leftPresences }) => {
+      for (const p of leftPresences || []) {
+        if (p.dbid && p.dbid !== myDbid) showToast(`${p.name}さんが退出しました`);
+      }
+    })
     .on('presence', { event: 'sync' }, onPresenceSync)
     .on('broadcast', { event: 'typing' }, ({ payload }) => showTyping(payload))
     .subscribe(async (status) => {
@@ -1086,7 +1062,7 @@ async function trackPresence() {
       dbid: myDbid, name: myName, color: myColor || colorForDbid(myDbid),
       last_read_at: lastReadAt, online_at: new Date().toISOString(),
     });
-  } catch (_) { /* 未接続時は無視 */ }
+  } catch (_) {  }
 }
 
 function onPresenceSync() {
@@ -1118,7 +1094,6 @@ window.addEventListener('online', async () => {
 });
 window.addEventListener('offline', () => setConnected(false));
 
-// 再接続時、取りこぼした分だけ取得する
 async function refreshSince() {
   if (!msgs.length) { await loadLatest(); return; }
   const last = msgs[msgs.length - 1].created_at;
@@ -1127,9 +1102,6 @@ async function refreshSince() {
   for (const m of data || []) onInsert(m);
 }
 
-/* ============================================================
-   描画
-   ============================================================ */
 function rowOf(id) { return messagesEl.querySelector(`[data-msg-id="${cssEscape(id)}"]`); }
 function cssEscape(v) { return String(v).replace(/["\\]/g, '\\$&'); }
 
@@ -1191,7 +1163,6 @@ function dayLabel(iso) {
   return d.toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' });
 }
 
-/* ---------- 1件ぶんのバブル ---------- */
 function buildRow(m) {
   const mine = m.sender_dbid === myDbid;
   const row = document.createElement('div');
@@ -1201,6 +1172,12 @@ function buildRow(m) {
   if (m.client_id) row.dataset.clientId = m.client_id;
   if (m.__pending) row.classList.add('sending');
   if (!mine && mentionsMe(m.content)) row.classList.add('mentions-me');
+  const prev = prevOf(m);
+  if (prefs.group && prev && prev.sender_dbid === m.sender_dbid
+      && dayLabel(prev.created_at) === row.dataset.day
+      && ts(m.created_at) - ts(prev.created_at) < 5 * 60 * 1000) {
+    row.classList.add('grouped');
+  }
 
   const col = document.createElement('div');
   col.className = 'bubble-col';
@@ -1228,6 +1205,7 @@ function buildRow(m) {
   if (mine && !m.__pending) meta.appendChild(el('div', '', 'read-mark'));
   meta.appendChild(el('div', m.__pending ? '🕘' : timeLabel(m.created_at), 'time'));
   if (m.edited_at) meta.appendChild(el('div', '編集済み', 'edited-mark'));
+  if (bookmarks.has(String(m.id))) meta.appendChild(el('div', '⭐', 'star-mark'));
   if (m.__failed) {
     const retry = document.createElement('button');
     retry.className = 'retry-btn';
@@ -1253,7 +1231,6 @@ function buildRow(m) {
 
   row.appendChild(col);
 
-  // 長押し(スマホ) / 右クリック(PC) でもメニューを開く
   if (!m.__pending) {
     let timer = null;
     bubble.addEventListener('contextmenu', (e) => { e.preventDefault(); openActionMenu(m); });
@@ -1268,12 +1245,37 @@ function buildRow(m) {
   return row;
 }
 
-// タイムスタンプの文字列表現がDBとブラウザで異なるため、比較は必ず数値で行う
 function ts(iso) { return iso ? Date.parse(iso) : 0; }
 
-function timeLabel(iso) {
-  return new Date(iso).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+function prevOf(m) {
+  const i = msgs.findIndex((x) => x.id === m.id);
+  return i > 0 ? msgs[i - 1] : null;
 }
+
+function timeLabel(iso) {
+  if (prefs.relTime) return relTimeLabel(iso);
+  const opt = { hour: '2-digit', minute: '2-digit' };
+  if (prefs.showSeconds) opt.second = '2-digit';
+  return new Date(iso).toLocaleTimeString('ja-JP', opt);
+}
+
+function relTimeLabel(iso) {
+  const diff = Math.floor((Date.now() - ts(iso)) / 1000);
+  if (diff < 60) return 'たった今';
+  if (diff < 3600) return `${Math.floor(diff / 60)}分前`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}時間前`;
+  return `${Math.floor(diff / 86400)}日前`;
+}
+
+function refreshTimeLabels() {
+  if (!prefs.relTime) return;
+  for (const row of messagesEl.querySelectorAll('.msg-row')) {
+    const m = msgById.get(mkey(row.dataset.msgId));
+    const t = row.querySelector('.time');
+    if (m && t && !m.__pending) t.textContent = relTimeLabel(m.created_at);
+  }
+}
+setInterval(refreshTimeLabels, 60000);
 
 function el(tag, text, cls) {
   const n = document.createElement(tag);
@@ -1282,12 +1284,11 @@ function el(tag, text, cls) {
   return n;
 }
 
-/* ---------- バブルの中身（引用・画像・本文） ---------- */
 function fillBubble(bubble, m) {
   bubble.textContent = '';
 
   if (m.reply_to) {
-    const src = msgById.get(m.reply_to);
+    const src = msgById.get(mkey(m.reply_to));
     const q = document.createElement('div');
     q.className = 'quote';
     q.appendChild(el('span', src ? src.sender_name : '削除されたメッセージ', 'q-name'));
@@ -1308,6 +1309,11 @@ function fillBubble(bubble, m) {
 
   const content = m.content || '';
   if (!content) return;
+  if (prefs.jumbo && !m.image_url && !m.reply_to && EMOJI_ONLY.test(content.trim())) {
+    bubble.classList.add('jumbo');
+    bubble.appendChild(document.createTextNode(content.trim()));
+    return;
+  }
   const holder = document.createElement('span');
   holder.className = 'msg-text';
   if (content.length <= COLLAPSE_LEN) {
@@ -1337,19 +1343,85 @@ function previewOf(m) {
   return m.image_url ? '画像' : '';
 }
 
-/* ---------- 本文の装飾（URL・メンション・簡易Markdown） ----------
-   すべて DOM API で組み立てるので innerHTML 経由のXSSは発生しない */
-const RICH_RE = /(https?:\/\/[^\s<>"']+)|(@[^\s@]{1,20})|\*\*([^*]+)\*\*|(?<!\*)\*([^*\n]+)\*(?!\*)|~~([^~]+)~~|`([^`]+)`/g;
+const RICH_RE = /(https?:\/\/[^\s<>"']+)|(@[^\s@]{1,20})|\|\|([^|]+)\|\||\*\*([^*]+)\*\*|(?<!\*)\*([^*\n]+)\*(?!\*)|~~([^~]+)~~|`([^`]+)`/g;
 
 function renderRichText(target, text) {
+  if (text.includes('```')) {
+    const parts = text.split(/```/);
+    parts.forEach((part, i) => {
+      if (i % 2 === 1) {
+        const wrap = el('div', '', 'code-wrap');
+        const pre = document.createElement('pre');
+        const code = part.replace(/^\n/, '');
+        pre.appendChild(el('code', code));
+        wrap.appendChild(pre);
+        const cp = el('button', 'コピー', 'code-copy');
+        cp.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          await navigator.clipboard.writeText(code);
+          cp.textContent = 'コピー済';
+          setTimeout(() => { cp.textContent = 'コピー'; }, 1400);
+        });
+        wrap.appendChild(cp);
+        target.appendChild(wrap);
+      } else if (part) {
+        renderBlocks(target, part);
+      }
+    });
+    return;
+  }
+  renderBlocks(target, text);
+}
+
+function renderBlocks(target, text) {
+  const lines = text.split('\n');
+  let list = null;
+  const flush = () => { if (list) { target.appendChild(list); list = null; } };
+  for (const line of lines) {
+    if (/^\s*[-*]\s+/.test(line)) {
+      if (!list) list = document.createElement('ul');
+      const li = document.createElement('li');
+      renderInline(li, line.replace(/^\s*[-*]\s+/, ''));
+      list.appendChild(li);
+      continue;
+    }
+    flush();
+    let mt = line.match(/^(#{1,3})\s+(.*)$/);
+    if (mt) {
+      const h = el('div', '', 'md-h' + mt[1].length);
+      renderInline(h, mt[2]);
+      target.appendChild(h);
+      continue;
+    }
+    mt = line.match(/^>\s?(.*)$/);
+    if (mt) {
+      const q = el('div', '', 'md-quote');
+      renderInline(q, mt[1]);
+      target.appendChild(q);
+      continue;
+    }
+    const div = el('div', '', 'md-line');
+    if (line) renderInline(div, line);
+    target.appendChild(div);
+  }
+  flush();
+}
+
+function renderInline(target, text) {
   let last = 0;
   for (const mt of text.matchAll(RICH_RE)) {
     if (mt.index > last) target.appendChild(document.createTextNode(text.slice(last, mt.index)));
-    const [full, url, mention, bold, italic, strike, code] = mt;
+    const [full, url, mention, spoiler, bold, italic, strike, code] = mt;
     if (url) {
       const a = document.createElement('a');
-      a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = url;
+      a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer';
+      a.textContent = prefs.shortLinks ? shortenUrl(url) : url;
+      a.title = url;
       target.appendChild(a);
+    } else if (spoiler) {
+      const sp = el('span', spoiler, 'spoiler');
+      sp.addEventListener('click', (e) => { e.stopPropagation(); sp.classList.toggle('shown'); });
+      target.appendChild(sp);
     } else if (mention) {
       const name = mention.slice(1);
       if (isKnownName(name)) {
@@ -1371,6 +1443,16 @@ function renderRichText(target, text) {
   if (last < text.length) target.appendChild(document.createTextNode(text.slice(last)));
 }
 
+function shortenUrl(url) {
+  try {
+    const u = new URL(url);
+    const tail = u.pathname.length > 1 ? '/…' : '';
+    return u.hostname.replace(/^www\./, '') + tail;
+  } catch (_) { return url; }
+}
+
+const EMOJI_ONLY = /^(?:\p{Extended_Pictographic}|\uFE0F|\u200D|\s){1,10}$/u;
+
 function isKnownName(name) {
   if (name === myName) return true;
   for (const u of knownUsers.values()) if (u.name === name) return true;
@@ -1382,7 +1464,6 @@ function mentionsMe(content) {
   return content.includes('@' + myName);
 }
 
-/* ---------- リアクション ---------- */
 function renderReactions(messageId) {
   const holder = messagesEl.querySelector(`[data-rx-for="${cssEscape(messageId)}"]`);
   if (!holder) return;
@@ -1405,7 +1486,6 @@ async function toggleReaction(messageId, emoji) {
   const set = reactionsByMsg.get(messageId)?.get(emoji);
   const mine = set && set.has(myDbid);
   if (mine) {
-    // 楽観的に消してからサーバーへ
     for (const [id, r] of reactionById) {
       if (r.message_id === messageId && r.dbid === myDbid && r.emoji === emoji) { dropReaction({ ...r, id }); break; }
     }
@@ -1422,11 +1502,10 @@ async function toggleReaction(messageId, emoji) {
   }
 }
 
-/* ---------- 既読表示（Presenceのlast_read_atから算出） ---------- */
 function updateReadReceipts() {
   const others = [...knownUsers.entries()].filter(([d, u]) => u.online && d !== myDbid);
   for (const row of messagesEl.querySelectorAll('.msg-row.mine')) {
-    const m = msgById.get(row.dataset.msgId);
+    const m = msgById.get(mkey(row.dataset.msgId));
     const mark = row.querySelector('.read-mark');
     if (!m || !mark) continue;
     const n = others.filter(([, u]) => u.last_read_at && ts(u.last_read_at) >= ts(m.created_at)).length;
@@ -1443,7 +1522,6 @@ function markRead() {
   trackPresence();
 }
 
-/* ---------- 入力中インジケーター ---------- */
 function showTyping({ dbid, name }) {
   if (!dbid || dbid === myDbid) return;
   clearTimeout(typingTimers.get(dbid)?.timer);
@@ -1475,7 +1553,6 @@ function sendTyping() {
     .catch(() => {});
 }
 
-/* ---------- スクロール・未読 ---------- */
 messagesEl.addEventListener('scroll', () => {
   const dist = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight;
   atBottom = dist < 80;
@@ -1484,6 +1561,7 @@ messagesEl.addEventListener('scroll', () => {
     updateJumpButton();
     markRead();
   }
+  $('#top-btn').classList.toggle('show', messagesEl.scrollTop > 600);
 });
 
 function scrollToBottom(instant) {
@@ -1505,14 +1583,16 @@ function updateJumpButton() {
   }
   updateTitleBadge();
 }
+$('#top-btn').addEventListener('click', () => messagesEl.scrollTo({ top: 0, behavior: 'smooth' }));
 jumpBtn.addEventListener('click', () => { unreadCount = 0; scrollToBottom(); updateJumpButton(); markRead(); });
 
 function updateTitleBadge() {
-  document.title = unreadCount > 0 ? `(${unreadCount}) トーク | LINE風チャット` : 'トーク | LINE風チャット';
+  document.title = unreadCount > 0 ? `(${unreadCount})Simple Talk` : 'Simple Talk';
+  updateFavicon();
 }
 
 async function jumpTo(id) {
-  if (msgById.has(id) && rowOf(id)) { focusMessage(id); return; }
+  if (msgById.has(mkey(id)) && rowOf(id)) { focusMessage(id); return; }
   const { data } = await supabase.from('messages').select('*').eq('id', id).maybeSingle();
   if (!data) { showToast('元のメッセージは見つかりませんでした'); return; }
   await loadAround(data);
@@ -1527,9 +1607,43 @@ function focusMessage(id) {
   row.classList.add('highlight');
 }
 
-/* ============================================================
-   メッセージのアクションメニュー
-   ============================================================ */
+async function loadPinned() {
+  const { data, error } = await supabase.from('messages').select('*')
+    .not('pinned_at', 'is', null)
+    .order('pinned_at', { ascending: false })
+    .limit(1);
+  if (error) return;
+  pinnedMsg = (data && data[0]) || null;
+  paintPinBar();
+}
+
+function paintPinBar() {
+  const bar = $('#pin-bar');
+  if (!pinnedMsg) { bar.classList.remove('open'); return; }
+  $('#pin-name').textContent = `${pinnedMsg.sender_name}さんのお知らせ`;
+  $('#pin-text').textContent = previewOf(pinnedMsg) || '画像';
+  bar.classList.add('open');
+}
+
+async function togglePin(m) {
+  const isPinned = pinnedMsg && pinnedMsg.id === m.id;
+  const { error } = await supabase.from('messages')
+    .update({ pinned_at: isPinned ? null : new Date().toISOString() })
+    .eq('id', m.id);
+  if (error) { showToast('ピン留めできませんでした: ' + error.message); return; }
+  showToast(isPinned ? 'ピン留めを外しました' : 'ピン留めしました');
+  await loadPinned();
+}
+
+$('#pin-bar').addEventListener('click', (e) => {
+  if (e.target.id === 'pin-unpin') return;
+  if (pinnedMsg) jumpTo(pinnedMsg.id);
+});
+$('#pin-unpin').addEventListener('click', async (e) => {
+  e.stopPropagation();
+  if (pinnedMsg) await togglePin(pinnedMsg);
+});
+
 function openActionMenu(m) {
   const mine = m.sender_dbid === myDbid;
   const overlay = document.createElement('div');
@@ -1562,6 +1676,20 @@ function openActionMenu(m) {
     await navigator.clipboard.writeText(m.content);
     showToast('コピーしました');
   });
+  add('その他のリアクション', '😀', () => openEmojiPicker(m));
+  add(bookmarks.has(String(m.id)) ? 'ブックマークを外す' : 'ブックマーク', '⭐', () => {
+    const k = String(m.id);
+    bookmarks.has(k) ? bookmarks.delete(k) : bookmarks.add(k);
+    saveBookmarks();
+    const row = rowOf(m.id);
+    if (row) row.replaceWith(buildRow(m));
+    showToast(bookmarks.has(k) ? 'ブックマークしました' : 'ブックマークを外しました');
+  });
+  add('リンクをコピー', '🔗', async () => {
+    await navigator.clipboard.writeText(`${location.origin}${location.pathname}#m=${m.id}`);
+    showToast('リンクをコピーしました');
+  });
+  add(pinnedMsg && pinnedMsg.id === m.id ? 'ピン留めを外す' : 'ピン留めする', '📌', () => togglePin(m));
   if (m.image_url) add('画像を開く', '🖼️', () => openLightbox(m.image_url));
   if (mine && m.content) add('編集する', '✏️', () => startEdit(m));
   if (mine && m.image_url) add('画像だけ削除', '🖼️🗑️', () => deleteImageOnly(m), true);
@@ -1572,7 +1700,18 @@ function openActionMenu(m) {
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
 }
 
-/* ---------- 返信 ---------- */
+function openEmojiPicker(m) {
+  const sheet = openSheet('リアクションを選ぶ');
+  const grid = el('div', '', 'emoji-grid');
+  for (const emoji of PICKER_EMOJI) {
+    const b = el('button', emoji);
+    if (reactionsByMsg.get(m.id)?.get(emoji)?.has(myDbid)) b.classList.add('on');
+    b.addEventListener('click', () => { toggleReaction(m.id, emoji); closeSheet(); });
+    grid.appendChild(b);
+  }
+  sheet.appendChild(grid);
+}
+
 function startReply(m) {
   cancelEdit();
   replyTo = m;
@@ -1587,7 +1726,6 @@ function cancelReply() {
 }
 $('#reply-cancel').addEventListener('click', cancelReply);
 
-/* ---------- 編集 ---------- */
 function startEdit(m) {
   cancelReply();
   editingId = m.id;
@@ -1612,17 +1750,15 @@ $('#edit-cancel').addEventListener('click', cancelEdit);
 async function deleteMessage(id) {
   if (!confirm('このメッセージを削除しますか？')) return;
   const row = rowOf(id);
-  const target = msgById.get(id);
+  const target = msgById.get(mkey(id));
   const { error } = await supabase.from('messages').delete().eq('id', id);
   if (error) { showToast('削除できませんでした: ' + error.message); return; }
   if (row) row.remove();
   msgs = msgs.filter((x) => x.id !== id);
-  msgById.delete(id);
-  if (target?.image_url) await deleteStorageObject(target.image_url); // Storage容量が溜まり続けないよう画像も消す
+  msgById.delete(mkey(id));
+  if (target?.image_url) await deleteStorageObject(target.image_url, target.image_bytes);
 }
 
-// 画像だけを削除する（本文は残す）。本文が無い＝画像のみの投稿だった場合は
-// 空メッセージを残せない制約(messages_not_empty)があるため、メッセージごと削除する。
 async function deleteImageOnly(m) {
   if (!m.image_url) return;
   if (!m.content || !m.content.trim()) {
@@ -1630,41 +1766,47 @@ async function deleteImageOnly(m) {
     return deleteMessage(m.id);
   }
   if (!confirm('画像だけを削除しますか？（本文は残ります）')) return;
-  const url = m.image_url;
-  const { error } = await supabase.from('messages').update({ image_url: null }).eq('id', m.id);
+  const url = m.image_url, bytes = m.image_bytes;
+  const { error } = await supabase.from('messages')
+    .update({ image_url: null, image_bytes: null }).eq('id', m.id);
   if (error) { showToast('画像を削除できませんでした: ' + error.message); return; }
-  await deleteStorageObject(url);
+  await deleteStorageObject(url, bytes);
   showToast('画像を削除しました');
 }
 
-// 添付画像のURLからStorage上のパスを逆算して削除する
-async function deleteStorageObject(url) {
+async function deleteStorageObject(url, knownBytes) {
   const marker = `/object/public/${BUCKET}/`;
   const i = url.indexOf(marker);
   if (i < 0) return;
   const path = decodeURIComponent(url.slice(i + marker.length).split('?')[0]);
-  const { error, data } = await supabase.storage.from(BUCKET).remove([path]);
-  if (error) { console.warn('画像の削除に失敗:', error.message); return; } // 本文削除自体は成功しているので致命的にはしない
-  const removedBytes = data?.[0]?.metadata?.size;
-  storageUsedBytes = Math.max(0, storageUsedBytes - (Number(removedBytes) || 0));
+  const { error } = await supabase.storage.from(BUCKET).remove([path]);
+  if (error) { console.warn('画像の削除に失敗:', error.message); return; }
+  storageUsedBytes = Math.max(0, storageUsedBytes - (Number(knownBytes) || 0));
   applyStorageFullState();
 }
 
-/* ============================================================
-   送信
-   ============================================================ */
 textInput.addEventListener('input', () => {
   autoGrow(textInput);
   updateByteCounter();
   updateMentionBox();
   if (textInput.value) sendTyping();
+  if (!editingId) localStorage.setItem('line_chat_draft', textInput.value);
 });
 sendBtn.addEventListener('click', submit);
 textInput.addEventListener('keydown', (e) => {
   if (mentionBox.classList.contains('open') && ['ArrowDown', 'ArrowUp', 'Enter', 'Tab', 'Escape'].includes(e.key)) {
     if (handleMentionKey(e)) return;
   }
-  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+  if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+    const k = e.key.toLowerCase();
+    if (k === 'b') { e.preventDefault(); wrapSelection('**', '**'); return; }
+    if (k === 'i') { e.preventDefault(); wrapSelection('*', '*'); return; }
+    if (k === 'e') { e.preventDefault(); wrapSelection('`', '`'); return; }
+    if (k === 'x' && e.shiftKey) { e.preventDefault(); wrapSelection('~~', '~~'); return; }
+    if (k === 'z' && !textInput.value) { e.preventDefault(); undoLastSend(); return; }
+  }
+  const enterSubmits = prefs.enterSends ? (!e.shiftKey) : (e.ctrlKey || e.metaKey);
+  if (e.key === 'Enter' && enterSubmits && !e.isComposing) {
     e.preventDefault();
     submit();
   } else if (e.key === 'ArrowUp' && !textInput.value && !editingId) {
@@ -1673,39 +1815,97 @@ textInput.addEventListener('keydown', (e) => {
   }
 });
 
+function wrapSelection(before, after) {
+  const a = textInput.selectionStart, b = textInput.selectionEnd;
+  const v = textInput.value;
+  textInput.value = v.slice(0, a) + before + v.slice(a, b) + after + v.slice(b);
+  textInput.focus();
+  textInput.setSelectionRange(a + before.length, b + before.length);
+  autoGrow(textInput);
+  updateByteCounter();
+}
+
+async function undoLastSend() {
+  if (!lastSentId || Date.now() - lastSentAt > 30000) { showToast('取り消せる送信はありません'); return; }
+  const id = lastSentId;
+  lastSentId = null;
+  const target = msgById.get(mkey(id));
+  await supabase.from('messages').delete().eq('id', id);
+  const row = rowOf(id);
+  if (row) row.remove();
+  msgs = msgs.filter((x) => x.id !== id);
+  msgById.delete(mkey(id));
+  if (target?.content) { textInput.value = target.content; autoGrow(textInput); updateByteCounter(); }
+  if (target?.image_url) await deleteStorageObject(target.image_url, target.image_bytes);
+  showToast('送信を取り消しました');
+}
+
 function autoGrow(node) {
   node.style.height = 'auto';
   node.style.height = Math.min(node.scrollHeight, 120) + 'px';
 }
 function currentByteLength() {
-  return new TextEncoder().encode(textInput.value).length; // TextEncoder APIで実バイト数を計測
+  return new TextEncoder().encode(textInput.value).length;
 }
 function updateByteCounter() {
   const bytes = currentByteLength();
-  byteCounterEl.textContent = `${bytes.toLocaleString()} / ${MAX_BYTES.toLocaleString()} バイト`;
+  byteCounterEl.textContent = `${textInput.value.length.toLocaleString()}文字 ・ ${bytes.toLocaleString()} / ${MAX_BYTES.toLocaleString()} バイト`;
   byteCounterEl.classList.toggle('over', bytes > MAX_BYTES);
-  sendBtn.disabled = (bytes === 0 && !pendingImage) || bytes > MAX_BYTES;
+  sendBtn.disabled = dbFull || (bytes === 0 && !pendingImage) || bytes > MAX_BYTES;
 }
 
 async function submit() {
   if (editingId) return saveEdit();
+  if (textInput.value.startsWith('/') && handleSlashCommand(textInput.value.trim())) return;
   return sendMessage();
+}
+
+function handleSlashCommand(line) {
+  const [cmd, ...rest] = line.split(/\s+/);
+  const arg = rest.join(' ');
+  const clear = () => { textInput.value = ''; autoGrow(textInput); updateByteCounter(); localStorage.removeItem('line_chat_draft'); };
+  switch (cmd) {
+    case '/help':
+      clear();
+      showToast('/shrug /tableflip /me /theme /clear /top /bottom /search');
+      return true;
+    case '/shrug':      textInput.value = (arg ? arg + ' ' : '') + '¯\\_(ツ)_/¯'; sendMessage(); return true;
+    case '/tableflip':  textInput.value = (arg ? arg + ' ' : '') + '(╯°□°）╯︵ ┻━┻'; sendMessage(); return true;
+    case '/me':         if (!arg) return true; textInput.value = `*${myName} ${arg}*`; sendMessage(); return true;
+    case '/theme':
+      clear();
+      if (['light', 'dark', 'system'].includes(arg)) { localStorage.setItem(LS.THEME, arg); applyTheme(); showToast('テーマを変えました'); }
+      else showToast('/theme light | dark | system');
+      return true;
+    case '/clear':      clear(); return true;
+    case '/top':        clear(); messagesEl.scrollTo({ top: 0, behavior: 'smooth' }); return true;
+    case '/bottom':     clear(); scrollToBottom(); return true;
+    case '/search':     clear(); toggleSearch(); if (arg) { searchInput.value = arg; runSearch(); } return true;
+    default: return false;
+  }
 }
 
 async function saveEdit() {
   const content = textInput.value;
   if (!content.trim()) { showToast('本文が空です'); return; }
   const id = editingId;
-  const { error } = await supabase.from('messages')
-    .update({ content, edited_at: new Date().toISOString() }).eq('id', id);
+  let { data, error } = await supabase.from('messages')
+    .update({ content, edited_at: new Date().toISOString() }).eq('id', id).select().maybeSingle();
+  if (error && /edited_at/.test(error.message || '')) {
+    ({ data, error } = await supabase.from('messages')
+      .update({ content }).eq('id', id).select().maybeSingle());
+    if (!error) showToast('保存しました（edited_at列が無いため「編集済み」は出ません）');
+  }
   if (error) { showToast('編集を保存できませんでした: ' + error.message); return; }
   cancelEdit();
+  if (data) onUpdate(data);
   showToast('編集しました');
 }
 
 async function sendMessage() {
   const content = textInput.value;
   if (!content.trim() && !pendingImage) return;
+  if (dbFull) { showToast('データベースが満杯のため送信できません'); return; }
   if (currentByteLength() > MAX_BYTES) { showToast('本文が大きすぎます（上限1024KB）'); return; }
 
   const clientId = crypto.randomUUID();
@@ -1721,7 +1921,6 @@ async function sendMessage() {
     __pending: true,
   };
 
-  // 楽観的に描画
   appendRow(draft);
   scrollToBottom();
   const file = pendingImage;
@@ -1735,15 +1934,17 @@ async function sendMessage() {
   let imageUrl = null;
   if (file) {
     imageUrl = await uploadImage(file, draft);
-    if (imageUrl === false) return; // アップロード失敗（行は失敗表示に差し替え済み）
+    if (imageUrl === false) return;
   }
 
+  localStorage.removeItem('line_chat_draft');
   const { error } = await supabase.from('messages').insert({
     sender_dbid: myDbid,
     sender_name: myName,
     content,
     reply_to: replySnapshot ? replySnapshot.id : null,
     image_url: imageUrl,
+    image_bytes: file ? file.size : null,
     client_id: clientId,
   });
 
@@ -1751,7 +1952,6 @@ async function sendMessage() {
     markDraftFailed(draft, error.message);
     return;
   }
-  // 成功時: Realtimeが確定版を配ってくるので、そこで一時行が消える
   setTimeout(() => {
     const stale = messagesEl.querySelector(`[data-client-id="${cssEscape(clientId)}"].sending`);
     if (stale) refreshSince();
@@ -1775,9 +1975,6 @@ async function retrySend(draft) {
   await sendMessage();
 }
 
-/* ============================================================
-   画像の添付（Supabase Storage）
-   ============================================================ */
 $('#attach-btn').addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', () => {
   if (fileInput.files[0]) setPendingImage(fileInput.files[0]);
@@ -1785,15 +1982,42 @@ fileInput.addEventListener('change', () => {
 });
 $('#image-cancel').addEventListener('click', clearPendingImage);
 
-function setPendingImage(file) {
+async function setPendingImage(file) {
   if (storageFull) { showToast('ストレージが満杯に近いため、いまは画像を送れません'); return; }
   if (!file.type.startsWith('image/')) { showToast('画像ファイルだけ送れます'); return; }
   if (file.size > MAX_IMAGE_BYTES) { showToast('画像は5MBまでです'); return; }
-  pendingImage = file;
-  $('#image-thumb').src = URL.createObjectURL(file);
-  $('#image-name').textContent = `${file.name}（${(file.size / 1024).toFixed(0)}KB）`;
+
+  const original = file.size;
+  const shrunk = await shrinkImage(file);
+  pendingImage = shrunk;
+  $('#image-thumb').src = URL.createObjectURL(shrunk);
+  const kb = (n) => (n / 1024).toFixed(0);
+  $('#image-name').textContent = shrunk.size < original * 0.95
+    ? `${file.name}（${kb(original)}KB → ${kb(shrunk.size)}KB に圧縮）`
+    : `${file.name}（${kb(shrunk.size)}KB）`;
   $('#image-bar').classList.add('open');
   updateByteCounter();
+}
+
+async function shrinkImage(file) {
+  if (file.type === 'image/gif') return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, IMAGE_MAX_EDGE / Math.max(bitmap.width, bitmap.height));
+    const w = Math.round(bitmap.width * scale);
+    const h = Math.round(bitmap.height * scale);
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    bitmap.close?.();
+    const blob = await new Promise((res) => canvas.toBlob(res, 'image/jpeg', IMAGE_QUALITY));
+    if (!blob || blob.size >= file.size) return file;
+    const name = file.name.replace(/\.[^.]+$/, '') + '.jpg';
+    return new File([blob], name, { type: 'image/jpeg' });
+  } catch (_) {
+    return file;
+  }
 }
 function clearPendingImage() {
   pendingImage = null;
@@ -1801,11 +2025,9 @@ function clearPendingImage() {
   updateByteCounter();
 }
 
-// storage_usage ビュー(schema.sql)からバケットの合計サイズを取得し、
-// 上限に近ければ添付ボタンを自動で無効化する
 async function refreshStorageUsage() {
   const { data, error } = await supabase.from('storage_usage').select('*').maybeSingle();
-  if (error || !data) return; // ビュー未作成など。取得できない間は制限しない
+  if (error || !data) return;
   storageUsedBytes = Number(data.total_bytes) || 0;
   applyStorageFullState();
 }
@@ -1833,15 +2055,14 @@ async function uploadImage(file, draft) {
     markDraftFailed(draft, error.message + '（schema.sql の Storage 設定を実行してください）');
     return false;
   }
-  storageUsedBytes += file.size; // 次のポーリングを待たずに即座に反映
+  storageUsedBytes += file.size;
   applyStorageFullState();
   return supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
 }
 
-// 貼り付け・ドラッグ&ドロップからの投稿
 document.addEventListener('paste', (e) => {
   const item = [...(e.clipboardData?.items || [])].find((i) => i.type.startsWith('image/'));
-  if (item) { setPendingImage(item.getAsFile()); if (!storageFull) showToast('画像を添付しました'); }
+  if (item) setPendingImage(item.getAsFile()).then(() => { if (pendingImage) showToast('画像を添付しました'); });
 });
 let dragDepth = 0;
 window.addEventListener('dragenter', (e) => {
@@ -1857,7 +2078,6 @@ window.addEventListener('drop', (e) => {
   if (file) setPendingImage(file);
 });
 
-/* ---------- ライトボックス ---------- */
 function openLightbox(url) {
   lightbox.querySelector('img').src = url;
   lightbox.querySelector('.lb-dl').href = url;
@@ -1871,9 +2091,6 @@ function closeLightbox() {
 lightbox.addEventListener('click', (e) => { if (e.target !== lightbox.querySelector('.lb-dl')) history.back(); });
 window.addEventListener('popstate', () => { if (lightbox.classList.contains('open')) closeLightbox(); });
 
-/* ============================================================
-   メンションのオートコンプリート
-   ============================================================ */
 let mentionCandidates = [];
 let mentionIndex = 0;
 
@@ -1935,21 +2152,42 @@ function applyMention(i) {
   updateByteCounter();
 }
 
-/* ============================================================
-   検索（サーバー横断・ILIKE）
-   ============================================================ */
 $('#search-btn').addEventListener('click', toggleSearch);
 $('#search-close').addEventListener('click', closeSearch);
 searchInput.addEventListener('input', debounce(runSearch, 260));
 
 function toggleSearch() {
   if (searchBar.classList.contains('open')) closeSearch();
-  else { searchBar.classList.add('open'); searchInput.focus(); }
+  else { searchBar.classList.add('open'); searchInput.focus(); paintSearchChips(); }
 }
 function closeSearch() {
   searchBar.classList.remove('open');
   searchResults.classList.remove('open');
+  $('#search-chips').style.display = 'none';
   searchInput.value = '';
+}
+
+function paintSearchChips() {
+  const box = $('#search-chips');
+  box.textContent = '';
+  box.style.display = 'flex';
+  const mk = (label, on, fn) => {
+    const c = el('button', label, 'chip' + (on ? ' on' : ''));
+    c.addEventListener('click', fn);
+    box.appendChild(c);
+  };
+  mk('自分のみ', searchFilterMine, () => { searchFilterMine = !searchFilterMine; paintSearchChips(); runSearch(); });
+  mk('画像つき', searchFilterImage, () => { searchFilterImage = !searchFilterImage; paintSearchChips(); runSearch(); });
+  if (!searchInput.value) {
+    for (const h of searchHistory.slice(0, 6)) {
+      mk(h, false, () => { searchInput.value = h; paintSearchChips(); runSearch(); });
+    }
+  }
+}
+
+function rememberSearch(q) {
+  searchHistory = [q, ...searchHistory.filter((x) => x !== q)].slice(0, 8);
+  localStorage.setItem('line_chat_searches', JSON.stringify(searchHistory));
 }
 
 async function runSearch() {
@@ -1960,10 +2198,11 @@ async function runSearch() {
   searchResults.innerHTML = '<div class="sr-empty">検索中…</div>';
 
   const pattern = '%' + q.replace(/[%_]/g, (c) => '\\' + c) + '%';
-  const { data, error } = await supabase.from('messages').select('*')
-    .ilike('content', pattern)
-    .order('created_at', { ascending: false })
-    .limit(50);
+  let query = supabase.from('messages').select('*').ilike('content', pattern);
+  if (searchFilterMine) query = query.eq('sender_dbid', myDbid);
+  if (searchFilterImage) query = query.not('image_url', 'is', null);
+  const { data, error } = await query.order('created_at', { ascending: false }).limit(50);
+  if (q) rememberSearch(q);
 
   if (token !== searchAbort) return;
   if (error) { searchResults.innerHTML = `<div class="sr-empty">検索できませんでした<br>${escapeHtml(error.message)}</div>`; return; }
@@ -2020,9 +2259,6 @@ function debounce(fn, ms) {
   return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
 }
 
-/* ============================================================
-   参加者リスト
-   ============================================================ */
 $('#members-open').addEventListener('click', openPeople);
 
 function openPeople() {
@@ -2060,15 +2296,11 @@ function openPeople() {
   section('過去に参加', offline, false);
 }
 
-/* ============================================================
-   設定パネル
-   ============================================================ */
 $('#settings-btn').addEventListener('click', openSettings);
 
 function openSettings() {
   const sheet = openSheet('設定');
 
-  // --- 見た目
   sheet.appendChild(el('label', 'テーマ'));
   sheet.appendChild(segmented(
     [['system', 'デバイスに合わせる'], ['light', 'ライト'], ['dark', 'ダーク']],
@@ -2083,8 +2315,66 @@ function openSettings() {
     (v) => { localStorage.setItem(LS.FONT, v); applyFontSize(); }
   ));
 
-  // --- 通知
+  sheet.appendChild(el('label', '表示'));
+  const toggles = [
+    ['group', '連続した発言をまとめる'],
+    ['relTime', '時刻を「◯分前」で表示'],
+    ['showSeconds', '秒まで表示'],
+    ['compact', 'コンパクト表示'],
+    ['hideAvatar', 'アイコンを隠す'],
+    ['noDots', '背景の模様をなくす'],
+    ['contrast', '文字を濃くする'],
+    ['shortLinks', 'リンクをドメインだけ表示'],
+    ['jumbo', '絵文字だけの発言を大きく'],
+    ['enterSends', 'Enterで送信（オフだと改行）'],
+  ];
+  for (const [key, label] of toggles) {
+    sheet.appendChild(switchRow(label, !!prefs[key], (on) => { setPref(key, on); renderAll(); }));
+  }
+
+  sheet.appendChild(el('label', 'アクセントカラー'));
+  const colorRow = el('div', '', 'chip-row');
+  colorRow.style.padding = '0';
+  for (const [name, hex] of [['標準', ''], ['青', '#3f8ae0'], ['紫', '#7c6ce0'], ['桃', '#d4569f'], ['橙', '#f4a259'], ['黒', '#333a40']]) {
+    const c = el('button', name, 'chip' + (prefs.accent === hex ? ' on' : ''));
+    c.addEventListener('click', () => {
+      setPref('accent', hex);
+      colorRow.querySelectorAll('.chip').forEach((n) => n.classList.remove('on'));
+      c.classList.add('on');
+      updateFavicon();
+    });
+    colorRow.appendChild(c);
+  }
+  sheet.appendChild(colorRow);
+
+  sheet.appendChild(el('label', '便利機能'));
+  const tools = [
+    ['ブックマークを見る', openBookmarks],
+    ['画像一覧を見る', openGallery],
+    ['日付にジャンプ', openDateJump],
+    ['定型文を編集', openSnippets],
+    ['全画面表示', toggleFullscreen],
+  ];
+  for (const [label, fn] of tools) {
+    const b = el('button', label, 'row-btn ghost');
+    b.addEventListener('click', fn);
+    sheet.appendChild(b);
+  }
+  sheet.appendChild(switchRow('画面を消えないようにする', !!wakeLock, toggleWakeLock));
+
   sheet.appendChild(el('label', 'お知らせ'));
+  sheet.appendChild(switchRow('自分宛て（メンション）だけ通知', !!prefs.mentionOnly, (on) => setPref('mentionOnly', on)));
+  const muteRow = el('div', '', 'chip-row');
+  muteRow.style.padding = '0';
+  for (const [label, mins] of [['解除', 0], ['30分', 30], ['1時間', 60], ['8時間', 480]]) {
+    const c = el('button', label, 'chip');
+    c.addEventListener('click', () => {
+      setPref('muteUntil', mins ? Date.now() + mins * 60000 : 0);
+      showToast(mins ? `${label}ミュートしました` : 'ミュートを解除しました');
+    });
+    muteRow.appendChild(c);
+  }
+  sheet.appendChild(muteRow);
   const soundRow = switchRow('新着メッセージの音', localStorage.getItem(LS.SOUND) !== '0', (on) => {
     localStorage.setItem(LS.SOUND, on ? '1' : '0');
     if (on) playPing();
@@ -2100,7 +2390,6 @@ function openSettings() {
   });
   sheet.appendChild(notifBtn);
 
-  // --- アカウント
   sheet.appendChild(el('label', 'あなたのID（dbid）'));
   const idBox = el('div', '', 'id-display');
   idBox.appendChild(el('span', myDbid));
@@ -2127,7 +2416,6 @@ function openSettings() {
       showToast(error.code === '23505' ? 'その表示名は使われています' : '変えられませんでした');
       return;
     }
-    // 過去メッセージの表示名はDBトリガー(sync_sender_name)が追従させる
     myName = newName;
     localStorage.setItem(LS.NAME, myName);
     knownUsers.set(myDbid, { ...(knownUsers.get(myDbid) || {}), name: myName });
@@ -2146,7 +2434,7 @@ function openSettings() {
       .update({ dbid: newDbid, avatar_color: colorForDbid(newDbid), updated_at: new Date().toISOString() })
       .eq('dbid', myDbid);
     if (error) { showToast('再発行できませんでした: ' + error.message); return; }
-    myDbid = newDbid;                       // ON UPDATE CASCADEで過去メッセージも追従
+    myDbid = newDbid;
     myColor = colorForDbid(newDbid);
     localStorage.setItem(LS.DBID, myDbid);
     closeSheet();
@@ -2156,7 +2444,6 @@ function openSettings() {
   });
   sheet.appendChild(regenBtn);
 
-  // --- 統計
   sheet.appendChild(el('label', 'この部屋の記録'));
   const grid = el('div', '', 'stat-grid');
   const s1 = el('div', '', 'stat'); s1.appendChild(el('b', '…')); s1.appendChild(el('span', '総メッセージ'));
@@ -2171,17 +2458,61 @@ function openSettings() {
     s2.querySelector('b').textContent = (mine.count ?? 0).toLocaleString();
   })();
 
-  sheet.appendChild(el('label', '画像ストレージ'));
-  const storageLine = el('div', '確認中…', 'bar-text');
-  storageLine.style.marginBottom = '4px';
+  sheet.appendChild(el('label', '容量'));
+  const mb = (n) => (n / (1024 * 1024)).toFixed(0);
+
+  const storageLine = el('div', '画像ストレージ: 確認中…', 'bar-text');
   sheet.appendChild(storageLine);
   refreshStorageUsage().then(() => {
-    const usedMB = (storageUsedBytes / (1024 * 1024)).toFixed(0);
-    const limitMB = (STORAGE_LIMIT_BYTES / (1024 * 1024)).toFixed(0);
-    storageLine.textContent = storageFull
-      ? `${usedMB}MB / ${limitMB}MB（満杯のため画像送信を停止中）`
-      : `${usedMB}MB / ${limitMB}MB`;
+    storageLine.textContent = `画像ストレージ: ${mb(storageUsedBytes)}MB / ${mb(STORAGE_LIMIT_BYTES)}MB`
+      + (storageFull ? '（満杯のため画像送信を停止中）' : '');
   });
+
+  const dbLine = el('div', 'データベース: 確認中…', 'bar-text');
+  dbLine.style.marginBottom = '4px';
+  sheet.appendChild(dbLine);
+  refreshDbUsage().then(() => {
+    dbLine.textContent = dbUsedBytes
+      ? `データベース: ${mb(dbUsedBytes)}MB / ${mb(DB_LIMIT_BYTES)}MB` + (dbFull ? '（満杯のため送信を停止中）' : '')
+      : 'データベース: 取得できません（schema.sql の db_usage() を実行してください）';
+  });
+
+  const cleanBtn = el('button', '使われていない画像を掃除する', 'row-btn ghost');
+  cleanBtn.addEventListener('click', () => cleanupOrphanImages(cleanBtn));
+  sheet.appendChild(cleanBtn);
+
+  const exportBtn = el('button', 'トークログを保存する', 'row-btn ghost');
+  exportBtn.addEventListener('click', () => exportLog(exportBtn));
+  sheet.appendChild(exportBtn);
+
+  const delImgBtn = el('button', '自分が送った画像をすべて削除', 'row-btn danger');
+  delImgBtn.addEventListener('click', () => bulkDeleteMine(true));
+  sheet.appendChild(delImgBtn);
+
+  const delAllBtn = el('button', '自分の発言をすべて削除', 'row-btn danger');
+  delAllBtn.addEventListener('click', () => bulkDeleteMine(false));
+  sheet.appendChild(delAllBtn);
+
+  sheet.appendChild(el('label', '時間帯ごとの投稿'));
+  const graph = el('div', '', 'hour-graph');
+  sheet.appendChild(graph);
+  const labels = el('div', '', 'hour-labels');
+  labels.append(el('span', '0時'), el('span', '6時'), el('span', '12時'), el('span', '18時'), el('span', '23時'));
+  sheet.appendChild(labels);
+  (async () => {
+    const { data } = await supabase.from('messages').select('created_at')
+      .order('created_at', { ascending: false }).limit(2000);
+    const buckets = new Array(24).fill(0);
+    for (const m of data || []) buckets[new Date(m.created_at).getHours()]++;
+    const max = Math.max(1, ...buckets);
+    graph.textContent = '';
+    buckets.forEach((n, h) => {
+      const bar = el('div', '', 'hb');
+      bar.style.height = Math.round((n / max) * 100) + '%';
+      bar.title = `${h}時台: ${n}件`;
+      graph.appendChild(bar);
+    });
+  })();
 
   const leaveBtn = el('button', 'この端末のデータを消す', 'row-btn danger');
   leaveBtn.addEventListener('click', () => {
@@ -2195,11 +2526,10 @@ function openSettings() {
 async function refreshNamesLocally() {
   const { data } = await supabase.from('messages').select('*')
     .in('id', msgs.map((m) => m.id).slice(0, 200));
-  for (const m of data || []) { msgById.set(m.id, m); const i = msgs.findIndex((x) => x.id === m.id); if (i >= 0) msgs[i] = m; }
+  for (const m of data || []) { msgById.set(mkey(m.id), m); const i = msgs.findIndex((x) => x.id === m.id); if (i >= 0) msgs[i] = m; }
   renderAll();
 }
 
-/* ---------- シート共通 ---------- */
 let currentSheet = null;
 function openSheet(title) {
   closeSheet();
@@ -2255,23 +2585,276 @@ function switchRow(label, on, onToggle) {
   return row;
 }
 
-/* ============================================================
-   通知（デスクトップ通知・音・振動）
-   ============================================================ */
+
+function openBookmarks() {
+  const sheet = openSheet('ブックマーク');
+  const ids = [...bookmarks];
+  if (!ids.length) { sheet.appendChild(el('div', 'まだありません。メッセージのメニューから追加できます。', 'sr-empty')); return; }
+  const list = el('div', '', 'people-list');
+  sheet.appendChild(list);
+  (async () => {
+    const { data } = await supabase.from('messages').select('*').in('id', ids)
+      .order('created_at', { ascending: false });
+    list.textContent = '';
+    for (const m of data || []) {
+      const item = el('div', '', 'sr-item');
+      const h = el('div', '', 'sr-head');
+      h.appendChild(el('span', m.sender_name));
+      h.appendChild(el('span', `${dayLabel(m.created_at)} ${timeLabel(m.created_at)}`));
+      item.appendChild(h);
+      item.appendChild(el('div', previewOf(m) || '画像', 'sr-body'));
+      item.addEventListener('click', () => { closeSheet(); jumpTo(m.id); });
+      list.appendChild(item);
+    }
+  })();
+}
+
+function openGallery() {
+  const sheet = openSheet('画像一覧');
+  const grid = el('div', '', 'gallery');
+  sheet.appendChild(grid);
+  (async () => {
+    const { data } = await supabase.from('messages').select('id,image_url,created_at,sender_name')
+      .not('image_url', 'is', null).order('created_at', { ascending: false }).limit(120);
+    if (!data || !data.length) { sheet.appendChild(el('div', '画像はまだありません。', 'sr-empty')); return; }
+    for (const m of data) {
+      const img = document.createElement('img');
+      img.loading = 'lazy';
+      img.src = m.image_url;
+      img.alt = `${m.sender_name}さんの画像`;
+      img.title = `${m.sender_name} ・ ${dayLabel(m.created_at)}`;
+      img.addEventListener('click', () => { closeSheet(); openLightbox(m.image_url); });
+      grid.appendChild(img);
+    }
+  })();
+}
+
+function openDateJump() {
+  const sheet = openSheet('日付にジャンプ');
+  const input = document.createElement('input');
+  input.type = 'date';
+  input.style.cssText = 'width:100%;padding:11px;border-radius:10px;border:1.5px solid var(--field-border);background:var(--field-bg);color:var(--text-main);font-size:14px;';
+  sheet.appendChild(input);
+  const go = el('button', 'その日へ移動', 'row-btn primary');
+  go.addEventListener('click', async () => {
+    if (!input.value) return;
+    const { data } = await supabase.from('messages').select('*')
+      .gte('created_at', new Date(input.value + 'T00:00:00').toISOString())
+      .order('created_at', { ascending: true }).limit(1);
+    closeSheet();
+    if (!data || !data.length) { showToast('その日以降のメッセージはありません'); return; }
+    await loadAround(data[0]);
+  });
+  sheet.appendChild(go);
+}
+
+function openSnippets() {
+  const sheet = openSheet('定型文');
+  const row = el('div', '', 'snippet-row');
+  const input = document.createElement('input');
+  input.placeholder = '登録する文章';
+  const addBtn = el('button', '追加', 'chip');
+  addBtn.addEventListener('click', () => {
+    const v = input.value.trim();
+    if (!v) return;
+    snippets.push(v); saveSnippets(); input.value = ''; paint();
+  });
+  row.append(input, addBtn);
+  sheet.appendChild(row);
+  const list = document.createElement('div');
+  sheet.appendChild(list);
+  function paint() {
+    list.textContent = '';
+    if (!snippets.length) { list.appendChild(el('div', 'まだありません。', 'sr-empty')); return; }
+    snippets.forEach((sn, i) => {
+      const item = el('div', '', 'snippet-item');
+      item.appendChild(el('span', sn));
+      const use = el('button', '使う');
+      use.addEventListener('click', () => {
+        textInput.value += (textInput.value ? '\n' : '') + sn;
+        autoGrow(textInput); updateByteCounter(); closeSheet(); textInput.focus();
+      });
+      const del = el('button', '削除');
+      del.addEventListener('click', () => { snippets.splice(i, 1); saveSnippets(); paint(); });
+      item.append(use, del);
+      list.appendChild(item);
+    });
+  }
+  paint();
+}
+
+async function bulkDeleteMine(imagesOnly) {
+  const what = imagesOnly ? '自分が送った画像すべて' : '自分の発言すべて';
+  if (!confirm(`${what}を削除します。取り消せません。よろしいですか？`)) return;
+  let q = supabase.from('messages').select('id,image_url,image_bytes').eq('sender_dbid', myDbid);
+  if (imagesOnly) q = q.not('image_url', 'is', null);
+  const { data, error } = await q;
+  if (error) { showToast('取得に失敗しました'); return; }
+  if (!data.length) { showToast('対象はありませんでした'); return; }
+  const paths = data.filter((m) => m.image_url).map((m) => pathFromUrl(m.image_url)).filter(Boolean);
+  if (imagesOnly) {
+    await supabase.from('messages').update({ image_url: null, image_bytes: null })
+      .eq('sender_dbid', myDbid).not('image_url', 'is', null);
+  } else {
+    await supabase.from('messages').delete().eq('sender_dbid', myDbid);
+  }
+  if (paths.length) {
+    for (let i = 0; i < paths.length; i += 100) await supabase.storage.from(BUCKET).remove(paths.slice(i, i + 100));
+  }
+  closeSheet();
+  showToast(`${data.length}件を削除しました`);
+  await loadLatest();
+  refreshStorageUsage();
+}
+
+function updateFavicon() {
+  try {
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const x = c.getContext('2d');
+    x.fillStyle = prefs.accent || '#06c755';
+    x.beginPath(); x.roundRect(2, 2, 60, 60, 14); x.fill();
+    x.fillStyle = '#fff'; x.font = 'bold 34px sans-serif';
+    x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.fillText(unreadCount > 0 ? String(Math.min(unreadCount, 99)) : '💬', 32, 34);
+    let link = document.querySelector('link[rel="icon"]');
+    if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link); }
+    link.href = c.toDataURL('image/png');
+  } catch (_) {}
+}
+
+let wakeLock = null;
+async function toggleWakeLock(on) {
+  try {
+    if (on) { wakeLock = await navigator.wakeLock.request('screen'); showToast('画面を消えないようにしました'); }
+    else { await wakeLock?.release(); wakeLock = null; }
+  } catch (_) { showToast('この端末では使えません'); }
+}
+
+function toggleFullscreen() {
+  if (document.fullscreenElement) document.exitFullscreen();
+  else document.documentElement.requestFullscreen?.().catch(() => showToast('全画面にできません'));
+}
+
+function installManifest() {
+  const manifest = {
+    name: 'Simple Talk', short_name: 'Simple Talk', start_url: location.pathname,
+    display: 'standalone', background_color: '#e5ebee', theme_color: prefs.accent || '#06c755',
+  };
+  const blob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
+  const link = document.createElement('link');
+  link.rel = 'manifest';
+  link.href = URL.createObjectURL(blob);
+  document.head.appendChild(link);
+}
+installManifest();
+
+function checkPermalink() {
+  const mt = location.hash.match(/^#m=(.+)$/);
+  if (mt) jumpTo(mt[1]);
+}
+window.addEventListener('hashchange', checkPermalink);
+
+async function cleanupOrphanImages(btn) {
+  if (!confirm('どのメッセージからも参照されていない画像を削除します。よろしいですか？')) return;
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = '確認中…';
+
+  try {
+    const referenced = new Set();
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await supabase.from('messages').select('image_url')
+        .not('image_url', 'is', null).range(from, from + 999);
+      if (error) throw error;
+      for (const r of data) referenced.add(pathFromUrl(r.image_url));
+      if (data.length < 1000) break;
+    }
+
+    const all = [];
+    const { data: folders, error: fErr } = await supabase.storage.from(BUCKET)
+      .list('', { limit: 1000 });
+    if (fErr) throw fErr;
+    for (const folder of folders || []) {
+      if (folder.id) { all.push({ path: folder.name, size: folder.metadata?.size }); continue; }
+      const { data: files } = await supabase.storage.from(BUCKET)
+        .list(folder.name, { limit: 1000 });
+      for (const f of files || []) all.push({ path: `${folder.name}/${f.name}`, size: f.metadata?.size });
+    }
+
+    const orphans = all.filter((f) => !referenced.has(f.path));
+    if (!orphans.length) { showToast('掃除する画像はありませんでした'); return; }
+
+    btn.textContent = `${orphans.length}件を削除中…`;
+    const freed = orphans.reduce((n, f) => n + (Number(f.size) || 0), 0);
+    for (let i = 0; i < orphans.length; i += 100) {
+      const { error } = await supabase.storage.from(BUCKET)
+        .remove(orphans.slice(i, i + 100).map((f) => f.path));
+      if (error) throw error;
+    }
+    storageUsedBytes = Math.max(0, storageUsedBytes - freed);
+    applyStorageFullState();
+    showToast(`${orphans.length}件（約${(freed / (1024 * 1024)).toFixed(1)}MB）を削除しました`);
+  } catch (e) {
+    showToast('掃除に失敗しました: ' + (e.message || e));
+  } finally {
+    btn.disabled = false; btn.textContent = label;
+  }
+}
+
+function pathFromUrl(url) {
+  const marker = `/object/public/${BUCKET}/`;
+  const i = String(url).indexOf(marker);
+  return i < 0 ? '' : decodeURIComponent(String(url).slice(i + marker.length).split('?')[0]);
+}
+
+async function exportLog(btn) {
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = '書き出し中…';
+  try {
+    const lines = [];
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await supabase.from('messages').select('*')
+        .order('created_at', { ascending: true }).range(from, from + 999);
+      if (error) throw error;
+      for (const m of data) {
+        const when = new Date(m.created_at).toLocaleString('ja-JP');
+        const body = (m.content || '').replace(/\n/g, '\n    ');
+        lines.push(`[${when}] ${m.sender_name}` + (m.image_url ? '（画像あり）' : ''));
+        if (body) lines.push('    ' + body);
+        if (m.image_url) lines.push('    ' + m.image_url);
+        lines.push('');
+      }
+      if (data.length < 1000) break;
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `talk-log-${new Date().toISOString().slice(0, 10)}.txt`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    showToast('保存しました');
+  } catch (e) {
+    showToast('書き出しに失敗しました: ' + (e.message || e));
+  } finally {
+    btn.disabled = false; btn.textContent = label;
+  }
+}
+
 function notifyIncoming(m) {
   const mention = mentionsMe(m.content);
-  if (mention) navigator.vibrate?.([18, 60, 18]);   // Vibration API
+  if (Date.now() < (prefs.muteUntil || 0)) return;
+  if (prefs.mentionOnly && !mention) return;
+  if (mention) navigator.vibrate?.([18, 60, 18]);
   if (localStorage.getItem(LS.SOUND) !== '0' && (document.visibilityState === 'hidden' || !atBottom || mention)) {
     playPing(mention);
   }
-  if (document.visibilityState !== 'hidden') return; // Page Visibility API
+  if (document.visibilityState !== 'hidden') return;
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
   const body = m.content ? (m.content.length > 60 ? m.content.slice(0, 60) + '…' : m.content) : '画像を送信しました';
   const n = new Notification(mention ? `${m.sender_name}（あなた宛て）` : m.sender_name, { body, tag: 'line-chat' });
   n.onclick = () => { window.focus(); n.close(); };
 }
 
-// Web Audio APIでその場で通知音を合成する（音声ファイル不要）
 function playPing(strong) {
   try {
     audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
@@ -2290,7 +2873,7 @@ function playPing(strong) {
       osc.start(now + i * 0.12);
       osc.stop(now + i * 0.12 + 0.3);
     });
-  } catch (_) { /* 自動再生がブロックされている場合は無視 */ }
+  } catch (_) {  }
 }
 
 document.addEventListener('visibilitychange', () => {
@@ -2303,9 +2886,6 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-/* ============================================================
-   キーボードショートカット
-   ============================================================ */
 document.addEventListener('keydown', (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); toggleSearch(); return; }
   if (e.key === 'Escape') {
@@ -2319,9 +2899,6 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-/* ============================================================
-   共通ユーティリティ
-   ============================================================ */
 function showToast(text) {
   const t = el('div', text, 'toast');
   document.body.appendChild(t);
@@ -2334,7 +2911,6 @@ function escapeHtml(str) {
   }[c]));
 }
 
-// 一定間隔で自分の在席を更新（他端末の既読表示・オンライン判定用）
 setInterval(() => { if (document.visibilityState === 'visible') trackPresence(); }, 45000);
 </script>
 </body>
