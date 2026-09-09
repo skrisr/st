@@ -2,44 +2,3578 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#06c755">
 <title>Simple Talk</title>
+<meta property="og:title" content="Simple Talk">
+<meta property="og:description" content="名前を入れるだけで参加できるチャット">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary">
 <style>
-  html, body { height: 100%; margin: 0; padding: 0; background: #000; overflow: hidden; }
-  iframe { position: fixed; inset: 0; width: 100vw; height: 100dvh; border: none; display: block; }
-  #fallback {
-    position: fixed; left: 0; right: 0; bottom: 0; z-index: 5;
-    background: rgba(0,0,0,.82); color: #fff; font-size: 13px; line-height: 1.7;
-    padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
-    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", Meiryo, sans-serif;
-    text-align: center;
+  :root{
+    --line-green:#06c755;
+    --line-green-dark:#05a648;
+    --bg-chat:#e5ebee;
+    --bg-panel:#ffffff;
+    --bubble-mine:#8de24e;
+    --bubble-mine-text:#093a00;
+    --bubble-other:#ffffff;
+    --bubble-other-text:#1a1a1a;
+    --header-bg:#06c755;
+    --header-text:#ffffff;
+    --text-main:#1a1a1a;
+    --text-sub:#8b98a1;
+    --border:#e2e6e8;
+    --field-bg:#ffffff;
+    --field-border:#dfe3e6;
+    --chip-bg:#f2f4f5;
+    --overlay:rgba(0,0,0,.45);
+    --quote-bg:rgba(0,0,0,.06);
+    --danger:#e0433b;
+    --header-h:56px;
+    --font-scale:1;
+    --dot:rgba(0,0,0,.045);
+    --bg-dim:0;
+    --radius:16px;
+    --font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
   }
-  #fallback a { color: #7ef2a4; }
+  [data-theme="dark"]{
+    --line-green:#06c755;
+    --line-green-dark:#05a648;
+    --bg-chat:#15171a;
+    --bg-panel:#22262b;
+    --bubble-mine:#2f6b3c;
+    --bubble-mine-text:#eafce4;
+    --bubble-other:#2b3037;
+    --bubble-other-text:#e6e9ec;
+    --header-bg:#1c1f23;
+    --header-text:#f0f2f4;
+    --text-main:#e6e9ec;
+    --text-sub:#8f9aa3;
+    --border:#33393f;
+    --field-bg:#2b3037;
+    --field-border:#3a4149;
+    --chip-bg:#31373e;
+    --overlay:rgba(0,0,0,.6);
+    --quote-bg:rgba(255,255,255,.09);
+    --danger:#ff7b73;
+    --dot:rgba(255,255,255,.04);
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    height:100%; margin:0; padding:0;
+    font-family:var(--font-family);
+    background:var(--bg-chat);
+    color:var(--text-main);
+    overscroll-behavior:none;
+    -webkit-text-size-adjust:100%;
+  }
+  #app{ height:100dvh; display:flex; flex-direction:column; }
+  button{ font-family:inherit; }
+  :focus-visible{ outline:2px solid var(--line-green); outline-offset:2px; }
+  @media (prefers-reduced-motion:reduce){ *{ animation-duration:.01ms !important; transition-duration:.01ms !important; } }
+
+  #gate{
+    height:100dvh; display:flex; align-items:center; justify-content:center;
+    background:linear-gradient(160deg,var(--line-green) 0%, var(--line-green-dark) 55%, #03823a 100%);
+    padding:20px;
+  }
+  #gate .card{
+    background:var(--bg-panel); width:100%; max-width:360px; border-radius:20px;
+    padding:32px 26px; box-shadow:0 20px 50px rgba(0,0,0,.25); text-align:center;
+  }
+  #gate .logo{
+    width:64px;height:64px;border-radius:18px;background:var(--line-green);
+    display:flex;align-items:center;justify-content:center;margin:0 auto 16px;
+    color:#fff;font-size:30px;font-weight:700;
+  }
+  #gate h1{ font-size:19px; margin:0 0 6px; color:var(--text-main);}
+  #gate p.sub{ font-size:13px; color:var(--text-sub); margin:0 0 22px;}
+  #gate input{
+    width:100%; padding:13px 14px; border-radius:10px; border:1.5px solid var(--field-border);
+    font-size:15px; outline:none; margin-bottom:10px; background:var(--field-bg); color:var(--text-main);
+  }
+  #gate input:focus{ border-color:var(--line-green); }
+  #gate button{
+    width:100%; padding:13px; border:none; border-radius:10px;
+    background:var(--line-green); color:#fff; font-size:15px; font-weight:700;
+    cursor:pointer; transition:opacity .15s;
+  }
+  #gate button:disabled{ opacity:.5; cursor:default; }
+  #gate button:not(:disabled):active{ opacity:.8; }
+  #gate .err{ color:var(--danger); font-size:12.5px; margin-top:8px; min-height:16px; }
+  #gate .hint{ font-size:11px; color:var(--text-sub); margin-top:18px; line-height:1.6; }
+
+  #chat{ display:flex; flex-direction:row; }
+  #main{ flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; }
+  #side{
+    width:var(--side-w,260px); min-width:180px; max-width:60vw; flex-shrink:0;
+    background:var(--bg-panel); border-right:1px solid var(--border);
+    display:flex; flex-direction:column; min-height:0;
+  }
+  #side-head{
+    height:var(--header-h); display:flex; align-items:center; justify-content:space-between;
+    padding:0 6px 0 14px; background:var(--header-bg); color:var(--header-text);
+    font-weight:700; font-size:15px; flex-shrink:0;
+  }
+  #side-head .icon-btn{ background:none;border:none;color:var(--header-text);font-size:17px;cursor:pointer;width:34px;height:34px;border-radius:50%; }
+  #side-list{ flex:1; overflow-y:auto; padding:6px 0 20px; }
+  .side-label{ font-size:10.5px; color:var(--text-sub); padding:10px 14px 4px; letter-spacing:.04em; }
+  .side-item{
+    display:flex; align-items:center; gap:10px; padding:9px 12px; cursor:pointer;
+    border-left:3px solid transparent;
+  }
+  .side-item:hover{ background:var(--chip-bg); }
+  .side-item.active{ background:var(--chip-bg); border-left-color:var(--line-green); }
+  .side-item .avatar{ width:34px;height:34px;font-size:14px;margin:0; }
+  .side-item .si-body{ flex:1; min-width:0; }
+  .side-item .si-name{ font-size:13.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .side-item .si-sub{ font-size:11px; color:var(--text-sub); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .side-item .si-badge{
+    background:var(--danger); color:#fff; border-radius:10px; font-size:10.5px; font-weight:700;
+    padding:1px 7px; flex-shrink:0;
+  }
+  .side-item .si-dot{ width:7px;height:7px;border-radius:50%;background:var(--line-green);flex-shrink:0; }
+  #splitter{
+    width:5px; flex-shrink:0; cursor:col-resize; background:var(--border);
+    transition:background .15s;
+  }
+  #splitter:hover, #splitter.dragging{ background:var(--line-green); }
+  #back-btn{ display:none; }
+
+  @media (max-width:760px){
+    #splitter{ display:none; }
+    #side{
+      position:absolute; inset:0; width:auto; max-width:none; z-index:20;
+      border-right:none;
+    }
+    body.show-talk #side{ display:none; }
+    body:not(.show-talk) #main{ display:none; }
+    #back-btn{ display:flex; }
+  }
+
+  #header{
+    height:var(--header-h); min-height:var(--header-h);
+    background:var(--header-bg); color:var(--header-text); display:flex; align-items:center;
+    padding:0 6px 0 12px; gap:6px; box-shadow:0 1px 4px rgba(0,0,0,.15); z-index:5;
+  }
+  #header .room-icon{
+    width:34px;height:34px;border-radius:10px;background:rgba(255,255,255,.22);
+    display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0;
+  }
+  #header .titles{ flex:1; min-width:0; cursor:pointer; }
+  #header .titles .name{ font-size:15.5px; font-weight:700; line-height:1.2; }
+  #header .titles .members{ font-size:11px; opacity:.9; line-height:1.3; display:flex; align-items:center; gap:5px;}
+  .conn-dot{ width:6px;height:6px;border-radius:50%;background:#7ef2a4; flex-shrink:0;}
+  .conn-dot.off{ background:#ffb4b0; }
+  #header button.icon-btn{
+    background:none;border:none;color:var(--header-text);font-size:18px;cursor:pointer;
+    width:36px;height:36px;border-radius:50%; display:flex;align-items:center;justify-content:center;
+    flex-shrink:0;
+  }
+  #header button.icon-btn:active{ background:rgba(255,255,255,.2); }
+
+  #search-bar{
+    display:none; background:var(--bg-panel); border-bottom:1px solid var(--border);
+    padding:8px 10px; gap:8px; align-items:center; z-index:4;
+  }
+  #search-bar.open{ display:flex; }
+  #search-input{
+    flex:1; padding:9px 12px; border-radius:18px; border:1px solid var(--field-border);
+    background:var(--field-bg); color:var(--text-main); font-size:14px; outline:none;
+  }
+  #search-input:focus{ border-color:var(--line-green); }
+  #search-bar button{
+    background:var(--chip-bg); border:none; color:var(--text-main); border-radius:16px;
+    padding:8px 12px; font-size:12.5px; cursor:pointer;
+  }
+  #search-results{
+    display:none; position:absolute; left:0; right:0; top:0; bottom:0; z-index:6;
+    background:var(--bg-chat); overflow-y:auto; padding:8px 10px 30px;
+  }
+  #search-results.open{ display:block; }
+  .sr-item{
+    background:var(--bg-panel); border-radius:12px; padding:11px 13px; margin-bottom:8px;
+    cursor:pointer; border:1px solid var(--border);
+  }
+  .sr-item:active{ opacity:.7; }
+  .sr-head{ font-size:11.5px; color:var(--text-sub); display:flex; justify-content:space-between; gap:8px; margin-bottom:4px;}
+  .sr-body{ font-size:13.5px; line-height:1.5; word-break:break-word; }
+  .sr-body mark, .bubble mark{ background:#ffe680; color:#3a2c00; border-radius:3px; padding:0 1px;}
+  [data-theme="dark"] .sr-body mark, [data-theme="dark"] .bubble mark{ background:#7a6320; color:#fff6d5; }
+  .sr-empty{ text-align:center; color:var(--text-sub); font-size:13px; padding:40px 10px; line-height:1.8;}
+
+  #pin-bar{
+    display:none; align-items:center; gap:9px; padding:8px 12px;
+    background:var(--bg-panel); border-bottom:1px solid var(--border); cursor:pointer;
+  }
+  #pin-bar.open{ display:flex; }
+  #pin-bar .pin-icon{ flex-shrink:0; font-size:14px; }
+  #pin-bar .pin-body{ flex:1; min-width:0; }
+  #pin-bar .pin-name{ font-size:10.5px; color:var(--line-green); font-weight:700; }
+  #pin-bar .pin-text{
+    font-size:12.5px; color:var(--text-main);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+
+  #chat-body{ flex:1; min-height:0; position:relative; display:flex; flex-direction:column; }
+  #messages{
+    flex:1; overflow-y:auto; padding:6px 10px 20px;
+    display:flex; flex-direction:column; gap:2px;
+    background-image: radial-gradient(var(--dot) 1px, transparent 1px);
+    background-size:14px 14px;
+    font-size:calc(14.5px * var(--font-scale));
+  }
+  body.has-bg #messages{
+    background-image:
+      linear-gradient(rgba(0,0,0,var(--bg-dim)), rgba(0,0,0,var(--bg-dim))),
+      var(--bg-image);
+    background-size:cover;
+    background-position:center;
+    background-attachment:local;
+  }
+  #top-sentinel{ height:1px; }
+  .loading-older{ text-align:center; font-size:11.5px; color:var(--text-sub); padding:10px 0; }
+  .day-sep{ text-align:center; margin:14px 0 8px; }
+  .day-sep span{
+    background:var(--quote-bg); color:var(--text-sub); font-size:11px; padding:3px 12px; border-radius:10px;
+  }
+  .unread-sep{ text-align:center; margin:14px 0 8px; position:relative; }
+  .unread-sep::before{
+    content:''; position:absolute; left:0; right:0; top:50%; height:1px; background:var(--danger); opacity:.45;
+  }
+  .unread-sep span{
+    position:relative; background:var(--danger); color:#fff; font-size:10.5px; padding:3px 12px; border-radius:10px;
+  }
+  .msg-row{ display:flex; margin:5px 0; max-width:100%; align-items:flex-end; gap:6px; }
+  .msg-row.mine{ justify-content:flex-end; }
+  .msg-row.theirs{ justify-content:flex-start; }
+  .msg-row.sending{ opacity:.55; }
+  .msg-row.highlight .bubble{ animation:flash 1.6s ease; }
+  @keyframes flash{
+    0%,25%{ box-shadow:0 0 0 3px rgba(6,199,85,.55); }
+    100%{ box-shadow:0 1px 1px rgba(0,0,0,.05); }
+  }
+
+  .avatar{
+    width:32px;height:32px;border-radius:50%;background:#c9d2d8;color:#fff;
+    display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;
+    flex-shrink:0; margin-bottom:2px; user-select:none;
+  }
+
+  .bubble-col{ display:flex; flex-direction:column; max-width:74%; min-width:0; }
+  .sender-name{ font-size:11.5px; color:var(--text-sub); margin:0 0 3px 3px; }
+
+  .bubble-wrap{ display:flex; align-items:flex-end; gap:5px; }
+  .msg-row.mine .bubble-wrap{ flex-direction:row-reverse; }
+
+  .bubble{
+    position:relative; padding:9px 12px; border-radius:var(--radius);
+    line-height:1.55; word-break:break-word; overflow-wrap:anywhere; white-space:pre-wrap;
+    box-shadow:0 1px 1px rgba(0,0,0,.05); cursor:default; -webkit-user-select:text;
+  }
+  .msg-row.theirs .bubble{
+    background:var(--bubble-other); color:var(--bubble-other-text); border-bottom-left-radius:4px;
+  }
+  .msg-row.mine .bubble{
+    background:var(--bubble-mine); color:var(--bubble-mine-text); border-bottom-right-radius:4px;
+  }
+  .msg-row.mentions-me .bubble{ box-shadow:0 0 0 2px var(--line-green); }
+  .bubble a{ color:inherit; text-decoration:underline; text-underline-offset:2px; }
+  .bubble code{
+    background:var(--quote-bg); padding:1px 5px; border-radius:5px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.9em;
+  }
+  .bubble del{ opacity:.65; }
+  .bubble pre{
+    background:var(--quote-bg); border-radius:8px; padding:8px 10px; margin:6px 0 2px;
+    overflow-x:auto; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:.86em; line-height:1.5; white-space:pre;
+  }
+  .bubble pre code{ background:none; padding:0; font-size:1em; }
+  .bubble .mention{ font-weight:700; text-decoration:underline; text-underline-offset:2px; }
+
+  .quote{
+    display:block; background:var(--quote-bg); border-left:3px solid currentColor;
+    border-radius:6px; padding:5px 8px; margin:-1px 0 7px; font-size:.86em; opacity:.85;
+    cursor:pointer; max-height:4.2em; overflow:hidden;
+  }
+  .quote .q-name{ font-weight:700; display:block; margin-bottom:1px; }
+  .quote .q-text{ display:block; white-space:pre-wrap; word-break:break-word; }
+
+  .bubble .msg-image{
+    display:block; max-width:min(240px,60vw); max-height:280px; width:auto; border-radius:10px;
+    margin:2px 0 0; cursor:zoom-in; background:var(--quote-bg);
+  }
+  .bubble .msg-image + .msg-text{ display:block; margin-top:7px; }
+
+  .meta{ display:flex; flex-direction:column; align-items:flex-end; gap:1px; margin-bottom:2px; flex-shrink:0;}
+  .msg-row.theirs .meta{ align-items:flex-start; }
+  .time{ font-size:10px; color:var(--text-sub); white-space:nowrap; }
+  .read-mark{ font-size:10px; color:var(--text-sub); white-space:nowrap; }
+  .edited-mark{ font-size:10px; color:var(--text-sub); }
+  .more-btn{
+    background:none;border:none;color:var(--text-sub); font-size:13px; cursor:pointer; padding:0 2px; line-height:1;
+  }
+  .retry-btn{ background:none;border:none;color:var(--danger); font-size:10.5px; cursor:pointer; padding:0;}
+
+  .more-toggle{
+    display:inline-block; margin-top:6px; font-size:.85em; font-weight:700;
+    text-decoration:underline; cursor:pointer; opacity:.8;
+  }
+
+  .reactions{ display:flex; flex-wrap:wrap; gap:4px; margin:4px 0 0; }
+  .msg-row.mine .reactions{ justify-content:flex-end; }
+  .reaction{
+    display:inline-flex; align-items:center; gap:3px; background:var(--bg-panel);
+    border:1px solid var(--border); border-radius:12px; padding:1px 7px; font-size:11.5px;
+    cursor:pointer; line-height:1.6; color:var(--text-main);
+  }
+  .reaction.by-me{ border-color:var(--line-green); background:rgba(6,199,85,.14); }
+  .reaction .n{ font-size:10.5px; color:var(--text-sub); }
+  .reaction.by-me .n{ color:var(--line-green-dark); font-weight:700; }
+  [data-theme="dark"] .reaction.by-me .n{ color:#7ef2a4; }
+
+  #typing{
+    position:absolute; left:12px; bottom:6px; font-size:11.5px; color:var(--text-sub);
+    background:var(--bg-panel); border:1px solid var(--border); border-radius:14px;
+    padding:4px 10px; display:none; box-shadow:0 2px 6px rgba(0,0,0,.08); z-index:3;
+  }
+  #typing.show{ display:block; }
+  #typing .dots span{ animation:blink 1.2s infinite; }
+  #typing .dots span:nth-child(2){ animation-delay:.2s; }
+  #typing .dots span:nth-child(3){ animation-delay:.4s; }
+  @keyframes blink{ 0%,60%,100%{opacity:.25} 30%{opacity:1} }
+
+  #jump-btn{
+    position:absolute; right:12px; bottom:14px; z-index:3; display:none;
+    background:var(--line-green); color:#fff; border:none; border-radius:20px;
+    padding:8px 14px; font-size:12.5px; font-weight:700; cursor:pointer;
+    box-shadow:0 3px 10px rgba(0,0,0,.25);
+  }
+  #jump-btn.show{ display:block; }
+  #top-btn{
+    position:absolute; right:12px; top:10px; z-index:3; display:none;
+    background:var(--bg-panel); color:var(--text-main); border:1px solid var(--border);
+    border-radius:50%; width:34px; height:34px; font-size:15px; cursor:pointer;
+    box-shadow:0 2px 8px rgba(0,0,0,.15);
+  }
+  #top-btn.show{ display:block; }
+
+  #reply-bar, #edit-bar{
+    display:none; background:var(--bg-panel); border-top:1px solid var(--border);
+    padding:8px 12px; align-items:center; gap:10px; font-size:12.5px;
+  }
+  #reply-bar.open, #edit-bar.open{ display:flex; }
+  #reply-bar .bar-body, #edit-bar .bar-body{ flex:1; min-width:0; }
+  #reply-bar .bar-label, #edit-bar .bar-label{ color:var(--line-green); font-weight:700; font-size:11.5px; }
+  #reply-bar .bar-text, #edit-bar .bar-text{
+    color:var(--text-sub); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .bar-close{ background:none;border:none;color:var(--text-sub);font-size:17px;cursor:pointer; }
+
+  #image-bar{ display:none; background:var(--bg-panel); border-top:1px solid var(--border); padding:8px 12px; align-items:center; gap:10px;}
+  #image-bar.open{ display:flex; }
+  #image-bar img{ width:52px;height:52px;object-fit:cover;border-radius:8px; }
+  #image-bar .img-name{ flex:1; font-size:12px; color:var(--text-sub); word-break:break-all; }
+
+  #composer{
+    background:var(--bg-panel); border-top:1px solid var(--border);
+    display:flex; align-items:flex-end; gap:8px; padding:10px 10px calc(10px + env(safe-area-inset-bottom));
+  }
+  #composer textarea{
+    flex:1; resize:none; border:1px solid var(--field-border); border-radius:20px;
+    padding:10px 14px; font-size:calc(14.5px * var(--font-scale)); max-height:120px; min-height:22px;
+    line-height:1.4; outline:none; font-family:inherit; background:var(--field-bg); color:var(--text-main);
+  }
+  #composer textarea:focus{ border-color:var(--line-green); }
+  .round-btn{
+    width:42px;height:42px;border-radius:50%;border:none;background:var(--chip-bg);
+    color:var(--text-main); font-size:18px; cursor:pointer; flex-shrink:0;
+    display:flex;align-items:center;justify-content:center; transition:opacity .15s;
+  }
+  #send-btn{ background:var(--line-green); color:#fff; font-size:17px; }
+  #send-btn:disabled{ opacity:.35; cursor:default; }
+  #byte-counter{ font-size:10.5px; color:var(--text-sub); text-align:right; padding:0 14px 4px 0; background:var(--bg-panel);}
+  #byte-counter.over{ color:var(--danger); font-weight:700; }
+  #drop-hint{
+    position:fixed; inset:0; z-index:70; display:none; align-items:center; justify-content:center;
+    background:rgba(6,199,85,.16); border:3px dashed var(--line-green); color:var(--line-green-dark);
+    font-size:16px; font-weight:700; pointer-events:none;
+  }
+  #drop-hint.show{ display:flex; }
+
+  #mention-box{
+    display:none; position:absolute; left:10px; right:10px; bottom:calc(100% + 4px);
+    background:var(--bg-panel); border:1px solid var(--border); border-radius:12px;
+    box-shadow:0 -4px 16px rgba(0,0,0,.15); max-height:180px; overflow-y:auto; z-index:8;
+  }
+  #mention-box.open{ display:block; }
+  .mention-item{ padding:10px 13px; font-size:13.5px; cursor:pointer; display:flex; align-items:center; gap:9px;}
+  .mention-item.active{ background:var(--chip-bg); }
+  .mention-item .avatar{ width:26px;height:26px;font-size:11px;margin:0; }
+
+  .modal-overlay{
+    position:fixed; inset:0; background:var(--overlay); display:flex; align-items:flex-end;
+    justify-content:center; z-index:50; animation:fadeIn .15s ease;
+  }
+  @keyframes fadeIn{ from{opacity:0} to{opacity:1} }
+  @keyframes slideUp{ from{transform:translateY(14px)} to{transform:translateY(0)} }
+  .modal-sheet{
+    position:relative; background:var(--bg-panel); width:100%; max-width:420px; border-radius:18px 18px 0 0;
+    padding:20px 20px calc(20px + env(safe-area-inset-bottom)); max-height:82vh; overflow-y:auto;
+    animation:slideUp .18s ease;
+  }
+  .modal-sheet h2{ font-size:16px; margin:0 0 16px; }
+  .modal-sheet label{ font-size:12px; color:var(--text-sub); display:block; margin:16px 0 6px; }
+  .modal-sheet input[type=text]{
+    width:100%; padding:11px 12px; border-radius:10px; border:1.5px solid var(--field-border);
+    font-size:14px; background:var(--field-bg); color:var(--text-main);
+  }
+  .row-btn{
+    width:100%; padding:12px; border-radius:10px; border:none; font-size:14px; font-weight:700;
+    margin-top:10px; cursor:pointer;
+  }
+  .row-btn.primary{ background:var(--line-green); color:#fff; }
+  .row-btn.ghost{ background:var(--chip-bg); color:var(--text-main); }
+  .row-btn.danger{ background:rgba(224,67,59,.12); color:var(--danger); }
+  .modal-sheet .close-x{
+    position:absolute; top:14px; right:16px; background:none; border:none; font-size:20px;
+    color:var(--text-sub); cursor:pointer;
+  }
+  .id-display{
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:11px; background:var(--chip-bg);
+    padding:8px 10px; border-radius:8px; word-break:break-all; color:var(--text-sub);
+    display:flex; justify-content:space-between; align-items:center; gap:8px;
+  }
+  .id-display button{ border:none; background:var(--border); color:var(--text-main); border-radius:6px; padding:4px 8px; font-size:11px; cursor:pointer; flex-shrink:0;}
+  .seg{ display:flex; gap:6px; }
+  .seg button{
+    flex:1; padding:9px 0; border-radius:9px; border:1.5px solid var(--field-border);
+    background:var(--field-bg); color:var(--text-main); font-size:13px; cursor:pointer;
+  }
+  .seg button.on{ border-color:var(--line-green); background:rgba(6,199,85,.12); font-weight:700; }
+  .switch-row{ display:flex; align-items:center; justify-content:space-between; padding:12px 0; border-bottom:1px solid var(--border); font-size:14px;}
+  .switch{ width:46px;height:26px;border-radius:13px;background:var(--border);position:relative;cursor:pointer;flex-shrink:0;transition:background .15s;}
+  .switch::after{ content:''; position:absolute; top:3px; left:3px; width:20px;height:20px;border-radius:50%;background:#fff; transition:transform .15s; box-shadow:0 1px 3px rgba(0,0,0,.3);}
+  .switch.on{ background:var(--line-green); }
+  .switch.on::after{ transform:translateX(20px); }
+  .stat-grid{ display:flex; gap:8px; margin-top:6px; }
+  .stat{ flex:1; background:var(--chip-bg); border-radius:10px; padding:10px 8px; text-align:center; }
+  .stat b{ display:block; font-size:19px; }
+  .stat span{ font-size:11px; color:var(--text-sub); }
+  .people-list{ margin-top:6px; }
+  .person{ display:flex; align-items:center; gap:10px; padding:9px 2px; font-size:14px; }
+  .person .who{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .person .badge{ font-size:10.5px; color:var(--text-sub); }
+  .person.online .badge{ color:var(--line-green); font-weight:700; }
+  .group-label{ font-size:11.5px; color:var(--text-sub); margin:14px 0 2px; }
+
+  .action-menu{
+    position:fixed; inset:0; z-index:60; background:var(--overlay);
+    display:flex; align-items:flex-end; justify-content:center; animation:fadeIn .12s ease;
+  }
+  .action-sheet{
+    background:var(--bg-panel); width:100%; max-width:420px; border-radius:18px 18px 0 0;
+    padding:10px 0 calc(10px + env(safe-area-inset-bottom)); animation:slideUp .16s ease;
+  }
+  .quick-react{ display:flex; justify-content:space-around; padding:6px 12px 12px; border-bottom:1px solid var(--border); }
+  .quick-react button{
+    background:none; border:none; font-size:26px; cursor:pointer; padding:4px 6px; border-radius:10px;
+    line-height:1;
+  }
+  .quick-react button.on{ background:rgba(6,199,85,.16); }
+  .action-item{
+    width:100%; background:none; border:none; text-align:left; padding:14px 20px; font-size:15px;
+    color:var(--text-main); cursor:pointer; display:flex; gap:12px; align-items:center;
+  }
+  .action-item:active{ background:var(--chip-bg); }
+  .action-item.danger{ color:var(--danger); }
+
+  .emoji-grid{ display:grid; grid-template-columns:repeat(8,1fr); gap:4px; margin-top:4px; }
+  .emoji-grid button{
+    background:none; border:none; font-size:22px; padding:6px 0; border-radius:8px; cursor:pointer;
+    line-height:1;
+  }
+  .emoji-grid button:active{ background:var(--chip-bg); }
+  .emoji-grid button.on{ background:rgba(6,199,85,.18); }
+
+  #lightbox{
+    position:fixed; inset:0; z-index:90; background:rgba(0,0,0,.92); display:none;
+    align-items:center; justify-content:center; padding:20px;
+  }
+  #lightbox.open{ display:flex; }
+  #lightbox img{ max-width:100%; max-height:100%; object-fit:contain; border-radius:6px; }
+  #lightbox .lb-close{ position:absolute; top:14px; right:18px; background:none;border:none;color:#fff;font-size:26px;cursor:pointer;}
+  #lightbox .lb-dl{ position:absolute; bottom:24px; left:50%; transform:translateX(-50%); color:#fff; font-size:13px; text-decoration:underline;}
+
+  .toast{
+    position:fixed; bottom:96px; left:50%; transform:translateX(-50%);
+    background:rgba(0,0,0,.82); color:#fff; padding:9px 18px; border-radius:20px; font-size:12.5px;
+    z-index:100; animation:fadeIn .15s ease; max-width:88vw; text-align:center;
+  }
+  body.compact .msg-row{ margin:2px 0; }
+  body.compact .bubble{ padding:6px 10px; }
+  body.compact #messages{ gap:0; }
+  body.hide-avatar .avatar{ display:none; }
+  body.no-dots #messages{ background-image:none; }
+  body.contrast{ --text-sub:var(--text-main); }
+  body.contrast .time, body.contrast .read-mark, body.contrast .sender-name{ color:var(--text-main); opacity:.8; }
+
+  .msg-row.grouped{ margin-top:1px; }
+  .msg-row.grouped .sender-name{ display:none; }
+  .msg-row.grouped .avatar{ visibility:hidden; }
+  .msg-row.grouped .bubble{ border-radius:16px; }
+  .msg-row.theirs.grouped .bubble{ border-bottom-left-radius:16px; }
+  .msg-row.mine.grouped .bubble{ border-bottom-right-radius:16px; }
+
+  .bubble.jumbo{ font-size:2.6em; line-height:1.25; padding:6px 10px; background:none !important; box-shadow:none; }
+  .bubble .md-line{ white-space:pre-wrap; }
+  .bubble .md-line:empty::after{ content:"\00a0"; }
+  .bubble .md-h1{ font-size:1.28em; font-weight:700; margin:3px 0 1px; }
+  .bubble .md-h2{ font-size:1.16em; font-weight:700; margin:3px 0 1px; }
+  .bubble .md-h3{ font-size:1.05em; font-weight:700; margin:3px 0 1px; }
+  .bubble .md-quote{
+    border-left:3px solid currentColor; opacity:.75; padding-left:8px; margin:2px 0;
+  }
+  .bubble ul{ margin:3px 0; padding-left:20px; }
+  .bubble li{ margin:1px 0; }
+  .bubble .spoiler{
+    background:currentColor; border-radius:4px; cursor:pointer; transition:background .15s;
+  }
+  .bubble .spoiler:not(.shown){ color:transparent !important; }
+  .bubble .spoiler.shown{ background:var(--quote-bg); }
+  .code-wrap{ position:relative; }
+  .code-copy{
+    position:absolute; top:5px; right:5px; font-size:10px; padding:2px 7px; border-radius:6px;
+    border:1px solid var(--border); background:var(--bg-panel); color:var(--text-main); cursor:pointer; opacity:.85;
+  }
+  .star-mark{ font-size:10px; }
+
+  .chip-row{ display:flex; gap:6px; flex-wrap:wrap; padding:6px 10px 0; }
+  .chip{
+    border:1px solid var(--field-border); background:var(--field-bg); color:var(--text-main);
+    border-radius:14px; padding:4px 10px; font-size:11.5px; cursor:pointer;
+  }
+  .chip.on{ border-color:var(--line-green); background:rgba(6,199,85,.14); font-weight:700; }
+
+  .gallery{ display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-top:6px; }
+  .gallery img{ width:100%; aspect-ratio:1; object-fit:cover; border-radius:8px; cursor:zoom-in; background:var(--chip-bg); }
+  .hour-graph{ display:flex; align-items:flex-end; gap:2px; height:70px; margin-top:8px; }
+  .hour-graph .hb{ flex:1; background:var(--line-green); border-radius:2px 2px 0 0; min-height:2px; }
+  .hour-labels{ display:flex; justify-content:space-between; font-size:9.5px; color:var(--text-sub); margin-top:3px; }
+  .snippet-row{ display:flex; gap:6px; align-items:center; margin-top:6px; }
+  .snippet-row input{ flex:1; padding:9px 10px; border-radius:8px; border:1.5px solid var(--field-border); background:var(--field-bg); color:var(--text-main); font-size:13px;}
+  .snippet-item{ display:flex; align-items:center; gap:8px; padding:8px 2px; font-size:13.5px; border-bottom:1px solid var(--border); }
+  .snippet-item span{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .snippet-item button{ border:none; background:var(--chip-bg); color:var(--text-main); border-radius:6px; padding:4px 9px; font-size:11px; cursor:pointer; }
+
+  #dbg-badge{
+    position:fixed; right:12px; bottom:76px; z-index:80;
+    background:var(--bg-panel); color:var(--text-main); border:1px solid var(--border);
+    border-radius:20px; padding:7px 12px; font-size:12.5px; cursor:pointer;
+    box-shadow:0 3px 10px rgba(0,0,0,.2);
+  }
+  #dbg-badge.has-err{ border-color:var(--danger); color:var(--danger); font-weight:700; }
+  #dbg-list{
+    margin-top:8px; max-height:46vh; overflow:auto; background:var(--chip-bg);
+    border-radius:10px; padding:8px; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:10.5px; line-height:1.55;
+  }
+  .dbg-row{ padding:2px 0; border-bottom:1px solid var(--border); word-break:break-all; white-space:pre-wrap; }
+  .dbg-row.error{ color:var(--danger); font-weight:700; }
+  .dbg-row.warn{ color:#c98a00; }
+  .dbg-row.ok{ opacity:.75; }
+  .dbg-row.info{ opacity:.9; }
+
+  .file-chip{
+    display:flex; align-items:center; gap:9px; background:var(--quote-bg);
+    border-radius:10px; padding:8px 11px; margin-top:2px; text-decoration:none; color:inherit;
+    max-width:100%;
+  }
+  .file-chip .fi{ font-size:20px; flex-shrink:0; }
+  .file-chip .fn{ min-width:0; }
+  .file-chip .fn b{ display:block; font-size:.92em; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .file-chip .fn span{ font-size:.78em; opacity:.7; }
+
+  .empty-hint{ text-align:center; color:var(--text-sub); font-size:12.5px; margin-top:40px; line-height:1.9; }
 </style>
 </head>
 <body>
-  <iframe
-    id="frame"
-    src="https://skrisr.github.io/st/"
-    title="Simple Talk"
-    allow="clipboard-read; clipboard-write; fullscreen; autoplay"
-    referrerpolicy="no-referrer-when-downgrade"
-  ></iframe>
 
-  <div id="fallback">
-    うまく動かないときは
-    <a href="https://skrisr.github.io/st/" target="_blank" rel="noopener">直接開く</a>
+<div id="app">
+
+  <div id="gate">
+    <div class="card">
+      <div class="logo">💬</div>
+      <h1>みんなの部屋</h1>
+      <p class="sub">名前を入力して参加してください</p>
+      <input id="real-input" type="text" maxlength="30" placeholder="本名（メンバー一覧に表示）" autocomplete="off">
+      <input id="name-input" type="text" maxlength="20" placeholder="表示名（トークに出る名前）" autocomplete="off">
+      <button id="enter-btn">はじめる</button>
+      <div class="err" id="gate-err"></div>
+      <div class="hint">本名はメンバー一覧にだけ出ます。誰が誰か分かるようにするためのものです。<br>表示名は他の人と重複できません。</div>
+    </div>
   </div>
 
-  <script>
-    var frame = document.getElementById('frame');
-    var here = location.href.replace(/[?#].*$/, '').replace(/index\.html$/, '');
-    var target = frame.src.replace(/[?#].*$/, '').replace(/index\.html$/, '');
-    if (here === target) {
-      frame.remove();
-      document.getElementById('fallback').textContent =
-        'このページ自身を読み込もうとしています。iframe の src を別の URL にしてください。';
+  <div id="chat" style="display:none; flex:1; min-height:0;">
+    <div id="side">
+      <div id="side-head">
+        <span id="side-title">Simple Talk</span>
+        <button class="icon-btn" id="side-settings" title="設定">⚙️</button>
+      </div>
+      <div id="side-list"></div>
+    </div>
+    <div id="splitter" title="ドラッグで幅を変えられます"></div>
+    <div id="main">
+    <div id="header">
+      <button class="icon-btn" id="back-btn" aria-label="一覧へ戻る">‹</button>
+      <div class="room-icon" id="room-icon">👥</div>
+      <div class="titles" id="members-open">
+        <div class="name" id="room-title">みんなの部屋</div>
+        <div class="members" id="member-count"><span class="conn-dot" id="conn-dot"></span><span id="member-text">接続中…</span></div>
+      </div>
+      <button class="icon-btn" id="search-btn" title="検索" aria-label="メッセージを検索">🔍</button>
+      <button class="icon-btn" id="settings-btn" title="設定" aria-label="設定を開く">⚙️</button>
+    </div>
+
+    <div id="search-bar">
+      <input id="search-input" type="search" placeholder="メッセージを検索" autocomplete="off">
+      <button id="search-close">閉じる</button>
+    </div>
+    <div id="search-chips" class="chip-row" style="display:none;"></div>
+
+    <div id="pin-bar">
+      <span class="pin-icon">📌</span>
+      <div class="pin-body">
+        <div class="pin-name" id="pin-name"></div>
+        <div class="pin-text" id="pin-text"></div>
+      </div>
+      <button class="bar-close" id="pin-unpin" aria-label="ピン留めを外す">✕</button>
+    </div>
+
+    <div id="chat-body">
+      <div id="messages"><div id="top-sentinel"></div></div>
+      <div id="search-results"></div>
+      <div id="typing"></div>
+      <button id="jump-btn"></button>
+      <button id="top-btn" title="いちばん上へ">⤒</button>
+    </div>
+
+    <div id="reply-bar">
+      <div class="bar-body">
+        <div class="bar-label" id="reply-label">返信</div>
+        <div class="bar-text" id="reply-text"></div>
+      </div>
+      <button class="bar-close" id="reply-cancel" aria-label="返信をやめる">✕</button>
+    </div>
+
+    <div id="edit-bar">
+      <div class="bar-body">
+        <div class="bar-label">メッセージを編集中</div>
+        <div class="bar-text" id="edit-text"></div>
+      </div>
+      <button class="bar-close" id="edit-cancel" aria-label="編集をやめる">✕</button>
+    </div>
+
+    <div id="image-bar">
+      <img id="image-thumb" alt="">
+      <div class="img-name" id="image-name"></div>
+      <button class="bar-close" id="image-cancel" aria-label="画像を外す">✕</button>
+    </div>
+
+    <div id="byte-counter">0 / 1,048,576 バイト</div>
+    <div id="composer" style="position:relative;">
+      <div id="mention-box"></div>
+      <button class="round-btn" id="attach-btn" title="ファイルを送る" aria-label="ファイルを送る">＋</button>
+      <button class="round-btn" id="snippet-btn" title="定型文" aria-label="定型文">📝</button>
+      <textarea id="text-input" rows="1" placeholder="メッセージを入力"></textarea>
+      <button class="round-btn" id="send-btn" aria-label="送信">➤</button>
+      <input type="file" id="file-input" hidden>
+    </div>
+    </div>
+  </div>
+
+</div>
+
+<div id="drop-hint">ここにドロップして画像を送る</div>
+
+<div id="lightbox">
+  <button class="lb-close" aria-label="閉じる">✕</button>
+  <img alt="添付画像">
+  <a class="lb-dl" target="_blank" rel="noopener">元のサイズで開く</a>
+</div>
+
+<script type="module">
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+
+function deobfuscate(scrambled) {
+  const b64 = scrambled.split('').reverse().join('');
+  return atob(b64);
+}
+const SUPABASE_URL = deobfuscate('==wbj5SZzFmYhBXdz5yYjhWa0pmezdWarJme4hGZ4dXd59yL6MHc0RHa');
+const SUPABASE_KEY = deobfuscate('==QRBV2MuZVYo91Z6JGeGl0SQx0ZQRWd2FmdR5mTSZWVfVGbiFGazlGbiVHcfJ2c');
+
+const DBG = {
+  on: localStorage.getItem('line_chat_debug') === '1',
+  buf: [],
+  max: 800,
+  errors: 0,
+  push(level, tag, detail) {
+    const entry = {
+      t: new Date().toISOString(),
+      level,
+      tag,
+      detail: DBG.safe(detail),
+    };
+    DBG.buf.push(entry);
+    if (DBG.buf.length > DBG.max) DBG.buf.shift();
+    if (level === 'error') { DBG.errors++; }
+    if (DBG.on) {
+      const fn = level === 'error' ? console.error : level === 'warn' ? console.warn : console.log;
+      fn(`[${tag}]`, detail);
+      DBG.paintBadge();
+      DBG.appendLive(entry);
     }
-  </script>
+  },
+  safe(v) {
+    if (v === undefined) return '';
+    if (v instanceof Error) return v.name + ': ' + v.message;
+    if (typeof v === 'string') return v.length > 600 ? v.slice(0, 600) + '…' : v;
+    try {
+      const j = JSON.stringify(v, (k, val) => (typeof val === 'string' && val.length > 300 ? val.slice(0, 300) + '…' : val));
+      return j && j.length > 800 ? j.slice(0, 800) + '…' : j;
+    } catch (_) { return String(v); }
+  },
+  ok(tag, d) { DBG.push('ok', tag, d); },
+  info(tag, d) { DBG.push('info', tag, d); },
+  warn(tag, d) { DBG.push('warn', tag, d); },
+  err(tag, d) { DBG.push('error', tag, d); },
+  text() {
+    return DBG.buf.map((e) => `${e.t}\t${e.level.toUpperCase()}\t${e.tag}\t${e.detail}`).join('\n');
+  },
+  clear() { DBG.buf = []; DBG.errors = 0; DBG.paintBadge(); const l = document.getElementById('dbg-list'); if (l) l.textContent = ''; },
+  paintBadge() {
+    let b = document.getElementById('dbg-badge');
+    if (!DBG.on) { b?.remove(); return; }
+    if (!b) {
+      b = document.createElement('button');
+      b.id = 'dbg-badge';
+      b.title = 'デバッグログを開く';
+      b.addEventListener('click', openDebugPanel);
+      document.body.appendChild(b);
+    }
+    b.textContent = DBG.errors ? `🐞 ${DBG.errors}` : '🐞';
+    b.classList.toggle('has-err', DBG.errors > 0);
+  },
+  appendLive(e) {
+    const list = document.getElementById('dbg-list');
+    if (!list) return;
+    list.appendChild(DBG.row(e));
+    list.scrollTop = list.scrollHeight;
+  },
+  row(e) {
+    const r = document.createElement('div');
+    r.className = 'dbg-row ' + e.level;
+    r.textContent = `${e.t.slice(11, 23)} [${e.tag}] ${e.detail}`;
+    return r;
+  },
+};
+
+function guard(tag, fn) {
+  return async function wrapped(...args) {
+    const started = performance.now();
+    try {
+      const out = await fn.apply(this, args);
+      DBG.ok(tag, `完了 ${(performance.now() - started).toFixed(0)}ms`);
+      return out;
+    } catch (e) {
+      DBG.err(tag, e);
+      showToast(`エラー(${tag}): ${e.message || e}`);
+      return undefined;
+    }
+  };
+}
+
+window.addEventListener('error', (e) => DBG.err('window.onerror', `${e.message} @${(e.filename || '').split('/').pop()}:${e.lineno}`));
+window.addEventListener('unhandledrejection', (e) => DBG.err('unhandledRejection', e.reason));
+
+const rawSupabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+function watchThenable(label, obj) {
+  if (!obj || typeof obj !== 'object') return obj;
+  return new Proxy(obj, {
+    get(target, prop, recv) {
+      const v = Reflect.get(target, prop, recv);
+      if (prop === 'then' && typeof v === 'function') {
+        return (onOk, onNg) => v.call(target, (res) => {
+          if (res && res.error) DBG.err(label, res.error.message || res.error);
+          else DBG.ok(label, res && res.data ? `${Array.isArray(res.data) ? res.data.length + '件' : 'ok'}` : 'ok');
+          return onOk ? onOk(res) : res;
+        }, onNg);
+      }
+      if (typeof v === 'function') {
+        return (...a) => watchThenable(label, v.apply(target, a));
+      }
+      return v;
+    },
+  });
+}
+
+const supabase = new Proxy(rawSupabase, {
+  get(target, prop, recv) {
+    const v = Reflect.get(target, prop, recv);
+    if (prop === 'from') return (table) => watchThenable('db:' + table, v.call(target, table));
+    if (prop === 'rpc') return (name, ...a) => watchThenable('rpc:' + name, v.call(target, name, ...a));
+    if (prop === 'storage') {
+      return new Proxy(v, {
+        get(st, p2, r2) {
+          const f = Reflect.get(st, p2, r2);
+          if (p2 === 'from') return (b) => watchThenable('storage:' + b, f.call(st, b));
+          return typeof f === 'function' ? f.bind(st) : f;
+        },
+      });
+    }
+    return typeof v === 'function' ? v.bind(target) : v;
+  },
+});
+
+const LS = {
+  DBID: 'line_chat_dbid',
+  NAME: 'line_chat_name',
+  THEME: 'line_chat_theme',
+  FONT: 'line_chat_font',
+  SOUND: 'line_chat_sound',
+  LASTSEEN: 'line_chat_last_seen',
+};
+const MAX_BYTES = 1024 * 1024;
+const COLLAPSE_LEN = 300;
+const PAGE_SIZE = 50;
+const BUCKET = 'chat-images';
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const FILE_ICONS = {
+  pdf: '📕', zip: '🗜️', rar: '🗜️', '7z': '🗜️', doc: '📘', docx: '📘',
+  xls: '📗', xlsx: '📗', csv: '📗', ppt: '📙', pptx: '📙', txt: '📄', md: '📄',
+  mp3: '🎵', wav: '🎵', m4a: '🎵', mp4: '🎬', mov: '🎬', webm: '🎬',
+  json: '🧾', html: '🧾', js: '🧾', css: '🧾', py: '🧾',
+};
+const isImageName = (n) => /\.(png|jpe?g|gif|webp|avif|bmp|svg)$/i.test(String(n || ''));
+function fileIcon(name) {
+  const ext = String(name || '').split('.').pop().toLowerCase();
+  return FILE_ICONS[ext] || '📎';
+}
+function humanSize(n) {
+  if (!n) return '';
+  if (n < 1024) return n + 'B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(0) + 'KB';
+  return (n / 1024 / 1024).toFixed(1) + 'MB';
+}
+const STORAGE_LIMIT_BYTES = 1024 * 1024 * 1024;
+const STORAGE_SAFE_MARGIN  = 20 * 1024 * 1024;
+const DB_LIMIT_BYTES       = 500 * 1024 * 1024;
+const DB_SAFE_MARGIN       = 25 * 1024 * 1024;
+const IMAGE_MAX_EDGE = 1600;
+const IMAGE_QUALITY  = 0.82;
+const QUICK_EMOJI = ['👍', '❤️', '😂', '😮', '🙏', '🎉'];
+const PICKER_EMOJI = [
+  '👍','👎','❤️','🔥','🎉','😂','🤣','😊','😍','🥰','😎','🤔',
+  '😮','😢','😭','😱','😴','🤯','🥺','😤','🙏','👏','🙌','🤝',
+  '💪','✨','⭐','💯','✅','❌','⚠️','❓','❗','💡','📌','🔗',
+  '🍺','🍜','🍰','☕','🎮','🎵','📷','🚀','🐱','🐶','🌸','🌙',
+];
+const AVATAR_COLORS = ['#f2545b','#f4a259','#e8b800','#4caf50','#00b1b5','#3f8ae0','#7c6ce0','#d4569f','#8a7a68','#4a6b8a'];
+
+let myDbid = localStorage.getItem(LS.DBID);
+let myName = localStorage.getItem(LS.NAME);
+let myReal = localStorage.getItem('line_chat_real') || '';
+let myColor = null;
+
+let msgs = [];
+const msgById = new Map();
+const mkey = (id) => String(id);
+const reactionsByMsg = new Map();
+const reactionById = new Map();
+const knownUsers = new Map();
+
+let replyTo = null;
+let editingId = null;
+let pendingImage = null;
+let storageUsedBytes = 0;
+let storageFull = false;
+let dbUsedBytes = 0;
+let dbFull = false;
+let pinnedMsg = null;
+let currentChannel = 'main';
+const unreadByChannel = new Map();
+const lastMsgByChannel = new Map();
+let reads = safeParse(localStorage.getItem('line_chat_reads'), {});
+
+function dmKey(a, b) { return 'dm:' + [String(a), String(b)].sort().join(':'); }
+function isDm(ch) { return String(ch).startsWith('dm:'); }
+function dmPartner(ch) {
+  if (!isDm(ch)) return null;
+  const [, a, b] = ch.split(':');
+  return a === myDbid ? b : a;
+}
+function channelTitle(ch) {
+  if (!isDm(ch)) return 'みんなの部屋';
+  const p = dmPartner(ch);
+  return (knownUsers.get(p) || {}).name || '不明な相手';
+}
+let hasOlder = true;
+let loadingOlder = false;
+let unreadCount = 0;
+let unreadBoundary = localStorage.getItem(LS.LASTSEEN) || null;
+let lastReadAt = unreadBoundary;
+let atBottom = true;
+let presenceChannel = null;
+let dbChannel = null;
+let typingTimers = new Map();
+let lastTypingSent = 0;
+let audioCtx = null;
+let searchAbort = 0;
+
+const PREF_KEY = 'line_chat_prefs';
+const PREF_DEFAULTS = {
+  enterSends: true, relTime: false, showSeconds: false, group: true,
+  compact: false, hideAvatar: false, noDots: false, contrast: false,
+  shortLinks: false, mentionOnly: false, muteUntil: 0, accent: '',
+  jumbo: true, bgUrl: '', bgDim: 0, font: 'default', radius: 16, mineColor: '',
+};
+let prefs = { ...PREF_DEFAULTS, ...safeParse(localStorage.getItem(PREF_KEY), {}) };
+function safeParse(v, fallback = {}) {
+  try {
+    const parsed = JSON.parse(v);
+    return (parsed === null || parsed === undefined) ? fallback : parsed;
+  } catch (_) { return fallback; }
+}
+function pref(k) { return prefs[k]; }
+function setPref(k, v) { prefs[k] = v; localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); applyPrefs(); }
+const FONT_STACKS = {
+  default: '-apple-system,BlinkMacSystemFont,"Hiragino Sans","Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif',
+  round: '"Hiragino Maru Gothic ProN","Yu Gothic",Meiryo,sans-serif',
+  mincho: '"Hiragino Mincho ProN","Yu Mincho",serif',
+  mono: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
+};
+
+function applyPrefs() {
+  const root = document.documentElement;
+  root.style.setProperty('--font-family', FONT_STACKS[prefs.font] || FONT_STACKS.default);
+  root.style.setProperty('--radius', (prefs.radius ?? 16) + 'px');
+  root.style.setProperty('--bg-dim', String(prefs.bgDim || 0));
+  if (prefs.bgUrl) {
+    root.style.setProperty('--bg-image', `url("${prefs.bgUrl.replace(/"/g, '%22')}")`);
+    document.body.classList.add('has-bg');
+  } else {
+    document.body.classList.remove('has-bg');
+  }
+  if (prefs.mineColor) root.style.setProperty('--bubble-mine', prefs.mineColor);
+  else root.style.removeProperty('--bubble-mine');
+  document.body.classList.toggle('compact', !!prefs.compact);
+  document.body.classList.toggle('hide-avatar', !!prefs.hideAvatar);
+  document.body.classList.toggle('no-dots', !!prefs.noDots);
+  document.body.classList.toggle('contrast', !!prefs.contrast);
+  if (prefs.accent) {
+    document.documentElement.style.setProperty('--line-green', prefs.accent);
+    document.documentElement.style.setProperty('--header-bg', prefs.accent);
+  } else {
+    document.documentElement.style.removeProperty('--line-green');
+    document.documentElement.style.removeProperty('--header-bg');
+  }
+}
+
+let bookmarks = new Set(safeParse(localStorage.getItem('line_chat_bookmarks'), []));
+function saveBookmarks() { localStorage.setItem('line_chat_bookmarks', JSON.stringify([...bookmarks])); }
+let snippets = safeParse(localStorage.getItem('line_chat_snippets'), []);
+function saveSnippets() { localStorage.setItem('line_chat_snippets', JSON.stringify(snippets)); }
+let searchHistory = safeParse(localStorage.getItem('line_chat_searches'), []);
+let lastSentId = null, lastSentAt = 0;
+let searchFilterMine = false, searchFilterImage = false;
+
+const $ = (sel) => document.querySelector(sel);
+const gateEl = $('#gate');
+const chatEl = $('#chat');
+const nameInput = $('#name-input');
+const enterBtn = $('#enter-btn');
+const gateErr = $('#gate-err');
+const messagesEl = $('#messages');
+const textInput = $('#text-input');
+const sendBtn = $('#send-btn');
+const byteCounterEl = $('#byte-counter');
+const memberTextEl = $('#member-text');
+const connDot = $('#conn-dot');
+const typingEl = $('#typing');
+const jumpBtn = $('#jump-btn');
+const searchBar = $('#search-bar');
+const searchInput = $('#search-input');
+const searchResults = $('#search-results');
+const mentionBox = $('#mention-box');
+const fileInput = $('#file-input');
+const lightbox = $('#lightbox');
+
+const prefersDark = window.matchMedia('(prefers-color-scheme: dark)');
+prefersDark.addEventListener('change', applyTheme);
+
+function applyTheme() {
+  const pref = localStorage.getItem(LS.THEME) || 'system';
+  const dark = pref === 'dark' || (pref === 'system' && prefersDark.matches);
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  const meta = document.querySelector('meta[name=theme-color]');
+  if (meta) meta.content = dark ? '#1c1f23' : '#06c755';
+}
+function applyFontSize() {
+  const size = localStorage.getItem(LS.FONT) || 'm';
+  document.documentElement.style.setProperty('--font-scale', size === 's' ? '0.88' : size === 'l' ? '1.16' : '1');
+}
+applyTheme();
+applyFontSize();
+applyPrefs();
+DBG.paintBadge();
+DBG.info('boot', 'アプリを起動しました');
+
+init();
+
+async function init() {
+  if (myDbid && myName) {
+    const ok = await syncUserToServer(myDbid, myName);
+    if (ok) { enterChat(); return; }
+  }
+  showGate();
+}
+
+function showGate() {
+  gateEl.style.display = 'flex';
+  chatEl.style.display = 'none';
+  nameInput.value = myName || '';
+  nameInput.focus();
+}
+
+enterBtn.addEventListener('click', handleEnter);
+nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') handleEnter(); });
+
+async function handleEnter() {
+  const name = nameInput.value.trim();
+  const real = $('#real-input').value.trim();
+  gateErr.textContent = '';
+  if (!real) { gateErr.textContent = '本名を入力してください。'; return; }
+  if (!name) { gateErr.textContent = '表示名を入力してください。'; return; }
+  if (name.length > 20) { gateErr.textContent = '表示名は20文字以内にしてください。'; return; }
+
+  enterBtn.disabled = true; enterBtn.textContent = '確認中…';
+  myReal = real;
+  const newDbid = myDbid || crypto.randomUUID();
+  const ok = await syncUserToServer(newDbid, name);
+  enterBtn.disabled = false; enterBtn.textContent = 'はじめる';
+
+  if (ok) {
+    myDbid = newDbid;
+    myName = name;
+    localStorage.setItem(LS.DBID, myDbid);
+    localStorage.setItem(LS.NAME, myName);
+    localStorage.setItem('line_chat_real', myReal);
+    enterChat();
+  }
+}
+
+async function syncUserToServer(dbid, name) {
+  myColor = colorForDbid(dbid);
+  const payload = {
+    dbid,
+    display_name: name,
+    avatar_color: myColor,
+    last_seen: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  if (myReal) payload.real_name = myReal;
+  let { error } = await supabase.from('users').upsert(payload, { onConflict: 'dbid' });
+  if (error && /real_name/.test(error.message || '')) {
+    delete payload.real_name;
+    ({ error } = await supabase.from('users').upsert(payload, { onConflict: 'dbid' }));
+  }
+
+  if (error) {
+    if (error.code === '23505') {
+      gateErr.textContent = 'その表示名はすでに使われています。別の名前にしてください。';
+    } else {
+      gateErr.textContent = '接続エラー: ' + error.message;
+    }
+    return false;
+  }
+  return true;
+}
+
+function colorForDbid(dbid) {
+  let h = 0;
+  for (const ch of String(dbid)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return AVATAR_COLORS[h % AVATAR_COLORS.length];
+}
+
+async function enterChat() {
+  gateEl.style.display = 'none';
+  chatEl.style.display = 'flex';
+  await loadUsers();
+  await loadLatest();
+  subscribeRealtime();
+  subscribePresence();
+  observeTopSentinel();
+  updateByteCounter();
+  applyPrefs();
+  const draft = localStorage.getItem('line_chat_draft');
+  if (draft) { textInput.value = draft; autoGrow(textInput); }
+  $('#snippet-btn').addEventListener('click', openSnippets);
+  checkPermalink();
+  lastReadAt = reads[currentChannel] || lastReadAt;
+  paintSide();
+  loadChannelPreviews();
+  if (window.innerWidth > 760) document.body.classList.add('show-talk');
+  refreshStorageUsage();
+  refreshDbUsage();
+  loadPinned();
+  setInterval(() => {
+    if (document.visibilityState !== 'visible') return;
+    refreshStorageUsage();
+    refreshDbUsage();
+  }, 120000);
+}
+
+async function refreshDbUsage() {
+  const { data, error } = await supabase.rpc('db_usage');
+  if (error || !data || !data.length) return;
+  dbUsedBytes = Number(data[0].total_bytes) || 0;
+  applyDbFullState();
+}
+
+function applyDbFullState() {
+  const wasFull = dbFull;
+  dbFull = dbUsedBytes >= (DB_LIMIT_BYTES - DB_SAFE_MARGIN);
+  if (dbFull && !wasFull) showToast('データベースが上限に近づいています。新規送信を停止しました');
+  textInput.disabled = dbFull;
+  textInput.placeholder = dbFull ? 'データベースが満杯のため送信できません' : 'メッセージを入力';
+  updateByteCounter();
+}
+
+async function loadUsers() {
+  let { data } = await supabase.from('users').select('dbid, display_name, avatar_color, last_seen, real_name');
+  if (!data) ({ data } = await supabase.from('users').select('dbid, display_name, avatar_color, last_seen'));
+  if (!data) return;
+  for (const u of data) {
+    knownUsers.set(u.dbid, {
+      name: u.display_name, real: u.real_name || '',
+      color: u.avatar_color || colorForDbid(u.dbid), online: false,
+    });
+  }
+}
+
+async function loadLatest() {
+  messagesEl.innerHTML = '<div class="empty-hint">読み込み中…</div>';
+  const { data, error } = await supabase
+    .from('messages').select('*')
+    .eq('channel', currentChannel)
+    .order('created_at', { ascending: false })
+    .limit(PAGE_SIZE);
+
+  if (error) {
+    messagesEl.innerHTML = `<div class="empty-hint">読み込めませんでした。<br>${escapeHtml(error.message)}</div>`;
+    return;
+  }
+  msgs = (data || []).slice().reverse();
+  hasOlder = (data || []).length === PAGE_SIZE;
+  msgById.clear();
+  for (const m of msgs) msgById.set(mkey(m.id), m);
+  await loadReactionsFor(msgs.map((m) => m.id));
+  renderAll();
+  scrollToBottom(true);
+  markRead();
+}
+
+async function loadAround(target) {
+  const [before, after] = await Promise.all([
+    supabase.from('messages').select('*').eq('channel', currentChannel).lt('created_at', target.created_at)
+      .order('created_at', { ascending: false }).limit(30),
+    supabase.from('messages').select('*').eq('channel', currentChannel).gte('created_at', target.created_at)
+      .order('created_at', { ascending: true }).limit(30),
+  ]);
+  const list = [...(before.data || []).reverse(), ...(after.data || [])];
+  msgs = dedupe(list);
+  hasOlder = (before.data || []).length === 30;
+  msgById.clear();
+  for (const m of msgs) msgById.set(mkey(m.id), m);
+  await loadReactionsFor(msgs.map((m) => m.id));
+  renderAll();
+  focusMessage(target.id);
+}
+
+async function loadOlder() {
+  if (loadingOlder || !hasOlder || !msgs.length) return;
+  loadingOlder = true;
+  const note = document.createElement('div');
+  note.className = 'loading-older';
+  note.textContent = '過去のメッセージを読み込み中…';
+  messagesEl.insertBefore(note, messagesEl.firstChild.nextSibling);
+
+  const { data } = await supabase.from('messages').select('*')
+    .eq('channel', currentChannel)
+    .lt('created_at', msgs[0].created_at)
+    .order('created_at', { ascending: false })
+    .limit(PAGE_SIZE);
+
+  note.remove();
+  const older = (data || []).slice().reverse();
+  hasOlder = (data || []).length === PAGE_SIZE;
+  if (older.length) {
+    const prevHeight = messagesEl.scrollHeight;
+    const prevTop = messagesEl.scrollTop;
+    msgs = dedupe([...older, ...msgs]);
+    for (const m of older) msgById.set(mkey(m.id), m);
+    await loadReactionsFor(older.map((m) => m.id));
+    renderAll();
+    messagesEl.scrollTop = prevTop + (messagesEl.scrollHeight - prevHeight);
+  }
+  loadingOlder = false;
+}
+
+function dedupe(list) {
+  const seen = new Set();
+  return list.filter((m) => (seen.has(m.id) ? false : (seen.add(m.id), true)))
+             .sort((a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0));
+}
+
+let topObserver = null;
+function observeTopSentinel() {
+  if (!topObserver) {
+    topObserver = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) loadOlder();
+    }, { root: messagesEl, rootMargin: '120px' });
+  }
+  const sentinel = $('#top-sentinel');
+  if (sentinel) topObserver.observe(sentinel);
+}
+
+async function loadReactionsFor(ids) {
+  if (!ids.length) return;
+  const { data } = await supabase.from('reactions').select('*').in('message_id', ids);
+  for (const r of data || []) storeReaction(r);
+}
+
+function storeReaction(r) {
+  reactionById.set(r.id, r);
+  if (!reactionsByMsg.has(r.message_id)) reactionsByMsg.set(r.message_id, new Map());
+  const byEmoji = reactionsByMsg.get(r.message_id);
+  if (!byEmoji.has(r.emoji)) byEmoji.set(r.emoji, new Set());
+  byEmoji.get(r.emoji).add(r.dbid);
+}
+
+function dropReaction(r) {
+  reactionById.delete(r.id);
+  const byEmoji = reactionsByMsg.get(r.message_id);
+  if (!byEmoji) return;
+  const set = byEmoji.get(r.emoji);
+  if (!set) return;
+  set.delete(r.dbid);
+  if (!set.size) byEmoji.delete(r.emoji);
+}
+
+function subscribeRealtime() {
+  if (dbChannel) supabase.removeChannel(dbChannel);
+  dbChannel = supabase.channel('db-changes')
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (p) => onInsert(p.new))
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, (p) => onUpdate(p.new))
+    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, (p) => onDelete(p.old))
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'reactions' }, (p) => {
+      storeReaction(p.new);
+      renderReactions(p.new.message_id);
+    })
+    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'reactions' }, (p) => {
+      const known = reactionById.get(p.old.id) || p.old;
+      if (!known || !known.message_id) return;
+      dropReaction(known);
+      renderReactions(known.message_id);
+    })
+    .subscribe((status) => { DBG.info('realtime', status); setConnected(status === 'SUBSCRIBED'); });
+}
+
+function onInsert(m) {
+  const ch = m.channel || 'main';
+  if (ch !== currentChannel) {
+    if (isDm(ch) && !ch.includes(myDbid)) return;
+    lastMsgByChannel.set(ch, m);
+    if (m.sender_dbid !== myDbid) {
+      unreadByChannel.set(ch, (unreadByChannel.get(ch) || 0) + 1);
+      notifyIncoming(m);
+    }
+    paintSide();
+    return;
+  }
+  if (m.client_id) {
+    const temp = messagesEl.querySelector(`[data-client-id="${cssEscape(m.client_id)}"]`);
+    if (temp) temp.remove();
+    if (m.sender_dbid === myDbid) { lastSentId = m.id; lastSentAt = Date.now(); }
+  }
+  if (msgById.has(mkey(m.id))) return;
+  lastMsgByChannel.set(ch, m);
+  paintSide();
+  msgById.set(mkey(m.id), m);
+  msgs.push(m);
+  const wasAtBottom = atBottom;
+  appendRow(m);
+  if (wasAtBottom) {
+    scrollToBottom();
+    markRead();
+  } else if (m.sender_dbid !== myDbid) {
+    unreadCount++;
+    updateJumpButton();
+  }
+  if (m.sender_dbid !== myDbid) {
+    notifyIncoming(m);
+    clearTyping(m.sender_dbid);
+  }
+}
+
+function onUpdate(m) {
+  if (pinnedMsg && pinnedMsg.id === m.id) { pinnedMsg = m.pinned_at ? m : null; paintPinBar(); }
+  const idx = msgs.findIndex((x) => x.id === m.id);
+  if (idx >= 0) msgs[idx] = m;
+  msgById.set(mkey(m.id), m);
+  const row = rowOf(m.id);
+  if (row) {
+    const fresh = buildRow(m);
+    row.replaceWith(fresh);
+    renderReactions(m.id);
+    updateReadReceipts();
+  }
+}
+
+function onDelete(old) {
+  if (!old || !old.id) return;
+  if (pinnedMsg && pinnedMsg.id === old.id) { pinnedMsg = null; paintPinBar(); }
+  msgs = msgs.filter((x) => x.id !== old.id);
+  msgById.delete(mkey(old.id));
+  const row = rowOf(old.id);
+  if (row) row.remove();
+}
+
+function subscribePresence() {
+  if (presenceChannel) supabase.removeChannel(presenceChannel);
+  presenceChannel = supabase.channel('room:main-presence', {
+    config: { presence: { key: myDbid }, broadcast: { self: false } },
+  });
+  presenceChannel
+    .on('presence', { event: 'join' }, ({ newPresences }) => {
+      for (const p of newPresences || []) {
+        if (p.dbid && p.dbid !== myDbid && knownUsers.size) showToast(`${p.name}さんが参加しました`);
+      }
+    })
+    .on('presence', { event: 'leave' }, ({ leftPresences }) => {
+      for (const p of leftPresences || []) {
+        if (p.dbid && p.dbid !== myDbid) showToast(`${p.name}さんが退出しました`);
+      }
+    })
+    .on('presence', { event: 'sync' }, onPresenceSync)
+    .on('broadcast', { event: 'typing' }, ({ payload }) => showTyping(payload))
+    .subscribe(async (status) => {
+      if (status === 'SUBSCRIBED') await trackPresence();
+    });
+}
+
+async function trackPresence() {
+  if (!presenceChannel) return;
+  try {
+    await presenceChannel.track({
+      dbid: myDbid, name: myName, color: myColor || colorForDbid(myDbid),
+      last_read_at: lastReadAt, channel: currentChannel, online_at: new Date().toISOString(),
+    });
+  } catch (_) {  }
+}
+
+function onPresenceSync() {
+  const state = presenceChannel.presenceState();
+  for (const u of knownUsers.values()) u.online = false;
+  let count = 0;
+  for (const key of Object.keys(state)) {
+    const p = state[key][0];
+    if (!p) continue;
+    count++;
+    const dbid = p.dbid || key;
+    const prev = knownUsers.get(dbid) || {};
+    knownUsers.set(dbid, { name: p.name || prev.name || '？', real: prev.real || '', color: p.color || colorForDbid(dbid), online: true, last_read_at: p.last_read_at, channel: p.channel });
+  }
+  if (!isDm(currentChannel)) memberTextEl.textContent = `${count}人が参加中`;
+  updateReadReceipts();
+  paintSide();
+}
+
+function setConnected(ok) {
+  connDot.classList.toggle('off', !ok);
+  if (!ok) memberTextEl.textContent = '接続していません';
+}
+
+window.addEventListener('online', async () => {
+  setConnected(true);
+  subscribeRealtime();
+  subscribePresence();
+  await refreshSince();
+});
+window.addEventListener('offline', () => setConnected(false));
+
+async function refreshSince() {
+  if (!msgs.length) { await loadLatest(); return; }
+  const last = msgs[msgs.length - 1].created_at;
+  const { data } = await supabase.from('messages').select('*')
+    .eq('channel', currentChannel)
+    .gt('created_at', last).order('created_at', { ascending: true }).limit(200);
+  for (const m of data || []) onInsert(m);
+}
+
+function rowOf(id) { return messagesEl.querySelector(`[data-msg-id="${cssEscape(id)}"]`); }
+function cssEscape(v) { return String(v).replace(/["\\]/g, '\\$&'); }
+
+function renderAll() {
+  messagesEl.innerHTML = '<div id="top-sentinel"></div>';
+  observeTopSentinel();
+  if (!msgs.length) {
+    const hint = document.createElement('div');
+    hint.className = 'empty-hint';
+    hint.innerHTML = 'まだメッセージはありません。<br>最初のひとことを送ってみましょう。';
+    messagesEl.appendChild(hint);
+    return;
+  }
+  let lastDay = null;
+  let unreadShown = false;
+  for (const m of msgs) {
+    lastDay = maybeInsertDaySeparator(m.created_at, lastDay);
+    if (!unreadShown && unreadBoundary && ts(m.created_at) > ts(unreadBoundary) && m.sender_dbid !== myDbid) {
+      const sep = document.createElement('div');
+      sep.className = 'unread-sep';
+      sep.innerHTML = '<span>ここから未読</span>';
+      messagesEl.appendChild(sep);
+      unreadShown = true;
+    }
+    messagesEl.appendChild(buildRow(m));
+  }
+  updateReadReceipts();
+}
+
+function appendRow(m) {
+  const hint = messagesEl.querySelector('.empty-hint');
+  if (hint) hint.remove();
+  const rows = messagesEl.querySelectorAll('.msg-row');
+  const prev = rows[rows.length - 1];
+  const prevDay = prev ? prev.dataset.day : null;
+  maybeInsertDaySeparator(m.created_at, prevDay);
+  messagesEl.appendChild(buildRow(m));
+  updateReadReceipts();
+}
+
+function maybeInsertDaySeparator(iso, lastDay) {
+  const day = dayLabel(iso);
+  if (day !== lastDay) {
+    const sep = document.createElement('div');
+    sep.className = 'day-sep';
+    sep.appendChild(el('span', day));
+    messagesEl.appendChild(sep);
+  }
+  return day;
+}
+
+function dayLabel(iso) {
+  const d = new Date(iso);
+  const today = new Date();
+  const yst = new Date(); yst.setDate(today.getDate() - 1);
+  const same = (a, b) => a.toDateString() === b.toDateString();
+  if (same(d, today)) return '今日';
+  if (same(d, yst)) return '昨日';
+  return d.toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' });
+}
+
+function buildRow(m) {
+  const mine = m.sender_dbid === myDbid;
+  const row = document.createElement('div');
+  row.className = 'msg-row ' + (mine ? 'mine' : 'theirs');
+  row.dataset.msgId = m.id;
+  row.dataset.day = dayLabel(m.created_at);
+  if (m.client_id) row.dataset.clientId = m.client_id;
+  if (m.__pending) row.classList.add('sending');
+  if (!mine && mentionsMe(m.content)) row.classList.add('mentions-me');
+  const prev = prevOf(m);
+  if (prefs.group && prev && prev.sender_dbid === m.sender_dbid
+      && dayLabel(prev.created_at) === row.dataset.day
+      && ts(m.created_at) - ts(prev.created_at) < 5 * 60 * 1000) {
+    row.classList.add('grouped');
+  }
+
+  const col = document.createElement('div');
+  col.className = 'bubble-col';
+
+  if (!mine) col.appendChild(el('div', m.sender_name, 'sender-name'));
+
+  const wrap = document.createElement('div');
+  wrap.className = 'bubble-wrap';
+
+  if (!mine) {
+    const av = document.createElement('div');
+    av.className = 'avatar';
+    av.style.background = (knownUsers.get(m.sender_dbid) || {}).color || colorForDbid(m.sender_dbid);
+    av.textContent = (m.sender_name || '?').trim().slice(0, 1).toUpperCase();
+    wrap.appendChild(av);
+  }
+
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  fillBubble(bubble, m);
+  wrap.appendChild(bubble);
+
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  if (mine && !m.__pending) meta.appendChild(el('div', '', 'read-mark'));
+  meta.appendChild(el('div', m.__pending ? '🕘' : timeLabel(m.created_at), 'time'));
+  if (m.edited_at) meta.appendChild(el('div', '編集済み', 'edited-mark'));
+  if (bookmarks.has(String(m.id))) meta.appendChild(el('div', '⭐', 'star-mark'));
+  if (m.__failed) {
+    const retry = document.createElement('button');
+    retry.className = 'retry-btn';
+    retry.textContent = '再送';
+    retry.addEventListener('click', () => retrySend(m));
+    meta.appendChild(retry);
+  } else if (!m.__pending) {
+    const more = document.createElement('button');
+    more.className = 'more-btn';
+    more.textContent = '⋯';
+    more.setAttribute('aria-label', 'メッセージの操作');
+    more.addEventListener('click', (e) => { e.stopPropagation(); openActionMenu(m); });
+    meta.appendChild(more);
+  }
+  wrap.appendChild(meta);
+
+  col.appendChild(wrap);
+
+  const rx = document.createElement('div');
+  rx.className = 'reactions';
+  rx.dataset.rxFor = m.id;
+  col.appendChild(rx);
+
+  row.appendChild(col);
+
+  if (!m.__pending) {
+    let timer = null;
+    bubble.addEventListener('contextmenu', (e) => { e.preventDefault(); openActionMenu(m); });
+    bubble.addEventListener('touchstart', () => {
+      timer = setTimeout(() => { navigator.vibrate?.(12); openActionMenu(m); }, 450);
+    }, { passive: true });
+    ['touchend', 'touchmove', 'touchcancel'].forEach((ev) =>
+      bubble.addEventListener(ev, () => clearTimeout(timer), { passive: true }));
+  }
+
+  queueMicrotask(() => renderReactions(m.id));
+  return row;
+}
+
+function ts(iso) { return iso ? Date.parse(iso) : 0; }
+
+function prevOf(m) {
+  const i = msgs.findIndex((x) => x.id === m.id);
+  return i > 0 ? msgs[i - 1] : null;
+}
+
+function timeLabel(iso) {
+  if (prefs.relTime) return relTimeLabel(iso);
+  const opt = { hour: '2-digit', minute: '2-digit' };
+  if (prefs.showSeconds) opt.second = '2-digit';
+  return new Date(iso).toLocaleTimeString('ja-JP', opt);
+}
+
+function relTimeLabel(iso) {
+  const diff = Math.floor((Date.now() - ts(iso)) / 1000);
+  if (diff < 60) return 'たった今';
+  if (diff < 3600) return `${Math.floor(diff / 60)}分前`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}時間前`;
+  return `${Math.floor(diff / 86400)}日前`;
+}
+
+function refreshTimeLabels() {
+  if (!prefs.relTime) return;
+  for (const row of messagesEl.querySelectorAll('.msg-row')) {
+    const m = msgById.get(mkey(row.dataset.msgId));
+    const t = row.querySelector('.time');
+    if (m && t && !m.__pending) t.textContent = relTimeLabel(m.created_at);
+  }
+}
+setInterval(refreshTimeLabels, 60000);
+
+function el(tag, text, cls) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text) n.textContent = text;
+  return n;
+}
+
+function fillBubble(bubble, m) {
+  bubble.textContent = '';
+
+  if (m.reply_to) {
+    const src = msgById.get(mkey(m.reply_to));
+    const q = document.createElement('div');
+    q.className = 'quote';
+    q.appendChild(el('span', src ? src.sender_name : '削除されたメッセージ', 'q-name'));
+    q.appendChild(el('span', src ? previewOf(src) : '元のメッセージは見つかりません', 'q-text'));
+    q.addEventListener('click', (e) => { e.stopPropagation(); jumpTo(m.reply_to); });
+    bubble.appendChild(q);
+  }
+
+  if (m.image_url) {
+    const looksImage = isImageName(m.file_name || m.image_url);
+    if (looksImage) {
+      const img = document.createElement('img');
+      img.className = 'msg-image';
+      img.loading = 'lazy';
+      img.src = m.image_url;
+      img.alt = m.file_name || '添付画像';
+      img.addEventListener('click', (e) => { e.stopPropagation(); openLightbox(m.image_url); });
+      bubble.appendChild(img);
+    } else {
+      const chip = document.createElement('a');
+      chip.className = 'file-chip';
+      chip.href = m.image_url;
+      chip.target = '_blank';
+      chip.rel = 'noopener noreferrer';
+      chip.download = m.file_name || '';
+      chip.addEventListener('click', (e) => e.stopPropagation());
+      chip.appendChild(el('span', fileIcon(m.file_name), 'fi'));
+      const fn = el('div', '', 'fn');
+      fn.appendChild(el('b', m.file_name || 'ファイル'));
+      fn.appendChild(el('span', humanSize(m.image_bytes) + ' ・ タップで開く'));
+      chip.appendChild(fn);
+      bubble.appendChild(chip);
+    }
+  }
+
+  const content = m.content || '';
+  if (!content) return;
+  if (prefs.jumbo && !m.image_url && !m.reply_to && EMOJI_ONLY.test(content.trim())) {
+    bubble.classList.add('jumbo');
+    bubble.appendChild(document.createTextNode(content.trim()));
+    return;
+  }
+  const holder = document.createElement('span');
+  holder.className = 'msg-text';
+  if (content.length <= COLLAPSE_LEN) {
+    renderRichText(holder, content);
+  } else {
+    const short = content.slice(0, COLLAPSE_LEN);
+    const body = document.createElement('span');
+    renderRichText(body, short + '…');
+    const toggle = el('div', `もっと見る（${content.length.toLocaleString()}文字）`, 'more-toggle');
+    let expanded = false;
+    toggle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      expanded = !expanded;
+      body.textContent = '';
+      renderRichText(body, expanded ? content : short + '…');
+      toggle.textContent = expanded ? '閉じる' : `もっと見る（${content.length.toLocaleString()}文字）`;
+    });
+    holder.appendChild(body);
+    holder.appendChild(toggle);
+  }
+  bubble.appendChild(holder);
+}
+
+function previewOf(m) {
+  const t = (m.content || '').replace(/\s+/g, ' ').trim();
+  if (t) return t.length > 60 ? t.slice(0, 60) + '…' : t;
+  return m.image_url ? '画像' : '';
+}
+
+const RICH_RE = /(https?:\/\/[^\s<>"']+)|(@[^\s@]{1,20})|\|\|([^|]+)\|\||\*\*([^*]+)\*\*|(?<!\*)\*([^*\n]+)\*(?!\*)|~~([^~]+)~~|`([^`]+)`/g;
+
+function renderRichText(target, text) {
+  if (text.includes('```')) {
+    const parts = text.split(/```/);
+    parts.forEach((part, i) => {
+      if (i % 2 === 1) {
+        const wrap = el('div', '', 'code-wrap');
+        const pre = document.createElement('pre');
+        const code = part.replace(/^\n/, '');
+        pre.appendChild(el('code', code));
+        wrap.appendChild(pre);
+        const cp = el('button', 'コピー', 'code-copy');
+        cp.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          await navigator.clipboard.writeText(code);
+          cp.textContent = 'コピー済';
+          setTimeout(() => { cp.textContent = 'コピー'; }, 1400);
+        });
+        wrap.appendChild(cp);
+        target.appendChild(wrap);
+      } else if (part) {
+        renderBlocks(target, part);
+      }
+    });
+    return;
+  }
+  renderBlocks(target, text);
+}
+
+function renderBlocks(target, text) {
+  const lines = text.split('\n');
+  let list = null;
+  const flush = () => { if (list) { target.appendChild(list); list = null; } };
+  for (const line of lines) {
+    if (/^\s*[-*]\s+/.test(line)) {
+      if (!list) list = document.createElement('ul');
+      const li = document.createElement('li');
+      renderInline(li, line.replace(/^\s*[-*]\s+/, ''));
+      list.appendChild(li);
+      continue;
+    }
+    flush();
+    let mt = line.match(/^(#{1,3})\s+(.*)$/);
+    if (mt) {
+      const h = el('div', '', 'md-h' + mt[1].length);
+      renderInline(h, mt[2]);
+      target.appendChild(h);
+      continue;
+    }
+    mt = line.match(/^>\s?(.*)$/);
+    if (mt) {
+      const q = el('div', '', 'md-quote');
+      renderInline(q, mt[1]);
+      target.appendChild(q);
+      continue;
+    }
+    const div = el('div', '', 'md-line');
+    if (line) renderInline(div, line);
+    target.appendChild(div);
+  }
+  flush();
+}
+
+function renderInline(target, text) {
+  let last = 0;
+  for (const mt of text.matchAll(RICH_RE)) {
+    if (mt.index > last) target.appendChild(document.createTextNode(text.slice(last, mt.index)));
+    const [full, url, mention, spoiler, bold, italic, strike, code] = mt;
+    if (url) {
+      const a = document.createElement('a');
+      a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer';
+      a.textContent = prefs.shortLinks ? shortenUrl(url) : url;
+      a.title = url;
+      target.appendChild(a);
+    } else if (spoiler) {
+      const sp = el('span', spoiler, 'spoiler');
+      sp.addEventListener('click', (e) => { e.stopPropagation(); sp.classList.toggle('shown'); });
+      target.appendChild(sp);
+    } else if (mention) {
+      const name = mention.slice(1);
+      if (isKnownName(name)) {
+        target.appendChild(el('span', mention, 'mention'));
+      } else {
+        target.appendChild(document.createTextNode(full));
+      }
+    } else if (bold) {
+      target.appendChild(el('strong', bold));
+    } else if (italic) {
+      target.appendChild(el('em', italic));
+    } else if (strike) {
+      target.appendChild(el('del', strike));
+    } else if (code) {
+      target.appendChild(el('code', code));
+    }
+    last = mt.index + full.length;
+  }
+  if (last < text.length) target.appendChild(document.createTextNode(text.slice(last)));
+}
+
+function shortenUrl(url) {
+  try {
+    const u = new URL(url);
+    const tail = u.pathname.length > 1 ? '/…' : '';
+    return u.hostname.replace(/^www\./, '') + tail;
+  } catch (_) { return url; }
+}
+
+const EMOJI_ONLY = /^(?:\p{Extended_Pictographic}|\uFE0F|\u200D|\s){1,10}$/u;
+
+function isKnownName(name) {
+  if (name === myName) return true;
+  for (const u of knownUsers.values()) if (u.name === name) return true;
+  return false;
+}
+
+function mentionsMe(content) {
+  if (!content || !myName) return false;
+  return content.includes('@' + myName);
+}
+
+function renderReactions(messageId) {
+  const holder = messagesEl.querySelector(`[data-rx-for="${cssEscape(messageId)}"]`);
+  if (!holder) return;
+  holder.textContent = '';
+  const byEmoji = reactionsByMsg.get(messageId);
+  if (!byEmoji || !byEmoji.size) return;
+  for (const [emoji, dbids] of byEmoji) {
+    if (!dbids.size) continue;
+    const chip = document.createElement('button');
+    chip.className = 'reaction' + (dbids.has(myDbid) ? ' by-me' : '');
+    chip.appendChild(document.createTextNode(emoji));
+    chip.appendChild(el('span', String(dbids.size), 'n'));
+    chip.title = [...dbids].map((d) => (knownUsers.get(d) || {}).name || '不明').join('、');
+    chip.addEventListener('click', () => toggleReaction(messageId, emoji));
+    holder.appendChild(chip);
+  }
+}
+
+async function toggleReaction(messageId, emoji) {
+  const set = reactionsByMsg.get(messageId)?.get(emoji);
+  const mine = set && set.has(myDbid);
+  if (mine) {
+    for (const [id, r] of reactionById) {
+      if (r.message_id === messageId && r.dbid === myDbid && r.emoji === emoji) { dropReaction({ ...r, id }); break; }
+    }
+    renderReactions(messageId);
+    const { error } = await supabase.from('reactions').delete()
+      .match({ message_id: messageId, dbid: myDbid, emoji });
+    if (error) showToast('リアクションを外せませんでした');
+  } else {
+    const { data, error } = await supabase.from('reactions')
+      .insert({ message_id: messageId, dbid: myDbid, emoji }).select().single();
+    if (error) { showToast('リアクションを付けられませんでした'); return; }
+    storeReaction(data);
+    renderReactions(messageId);
+  }
+}
+
+function updateReadReceipts() {
+  const others = [...knownUsers.entries()]
+    .filter(([d, u]) => u.online && d !== myDbid && (u.channel || 'main') === currentChannel);
+  for (const row of messagesEl.querySelectorAll('.msg-row.mine')) {
+    const m = msgById.get(mkey(row.dataset.msgId));
+    const mark = row.querySelector('.read-mark');
+    if (!m || !mark) continue;
+    const n = others.filter(([, u]) => u.last_read_at && ts(u.last_read_at) >= ts(m.created_at)).length;
+    mark.textContent = n > 0 ? `既読${others.length > 1 ? ' ' + n : ''}` : '';
+  }
+}
+
+function markRead() {
+  if (!msgs.length) return;
+  const newest = msgs[msgs.length - 1].created_at;
+  if (lastReadAt && ts(lastReadAt) >= ts(newest)) return;
+  lastReadAt = newest;
+  reads[currentChannel] = lastReadAt;
+  localStorage.setItem('line_chat_reads', JSON.stringify(reads));
+  localStorage.setItem(LS.LASTSEEN, lastReadAt);
+  trackPresence();
+}
+
+function showTyping({ dbid, name, channel }) {
+  if (!dbid || dbid === myDbid) return;
+  if ((channel || 'main') !== currentChannel) return;
+  clearTimeout(typingTimers.get(dbid)?.timer);
+  typingTimers.set(dbid, { name, timer: setTimeout(() => clearTyping(dbid), 3200) });
+  paintTyping();
+}
+function clearTyping(dbid) {
+  const t = typingTimers.get(dbid);
+  if (t) clearTimeout(t.timer);
+  typingTimers.delete(dbid);
+  paintTyping();
+}
+function paintTyping() {
+  const names = [...typingTimers.values()].map((t) => t.name).filter(Boolean);
+  if (!names.length) { typingEl.classList.remove('show'); return; }
+  const label = names.length === 1 ? `${names[0]}さんが入力中` : `${names.length}人が入力中`;
+  typingEl.textContent = '';
+  typingEl.appendChild(document.createTextNode(label));
+  const dots = el('span', '', 'dots');
+  dots.innerHTML = '<span>・</span><span>・</span><span>・</span>';
+  typingEl.appendChild(dots);
+  typingEl.classList.add('show');
+}
+function sendTyping() {
+  const now = Date.now();
+  if (now - lastTypingSent < 1500 || !presenceChannel) return;
+  lastTypingSent = now;
+  presenceChannel.send({ type: 'broadcast', event: 'typing', payload: { dbid: myDbid, name: myName, channel: currentChannel } })
+    .catch(() => {});
+}
+
+messagesEl.addEventListener('scroll', () => {
+  const dist = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight;
+  atBottom = dist < 80;
+  if (atBottom) {
+    unreadCount = 0;
+    updateJumpButton();
+    markRead();
+  }
+  $('#top-btn').classList.toggle('show', messagesEl.scrollTop > 600);
+});
+
+function scrollToBottom(instant) {
+  requestAnimationFrame(() => {
+    messagesEl.scrollTo({ top: messagesEl.scrollHeight, behavior: instant ? 'auto' : 'smooth' });
+    atBottom = true;
+  });
+}
+
+function updateJumpButton() {
+  if (unreadCount > 0) {
+    jumpBtn.textContent = `新着 ${unreadCount}件 ↓`;
+    jumpBtn.classList.add('show');
+  } else if (!atBottom) {
+    jumpBtn.textContent = '最新へ ↓';
+    jumpBtn.classList.add('show');
+  } else {
+    jumpBtn.classList.remove('show');
+  }
+  updateTitleBadge();
+}
+$('#top-btn').addEventListener('click', () => messagesEl.scrollTo({ top: 0, behavior: 'smooth' }));
+jumpBtn.addEventListener('click', () => { unreadCount = 0; scrollToBottom(); updateJumpButton(); markRead(); });
+
+function totalUnread() {
+  let n = unreadCount;
+  for (const [ch, c] of unreadByChannel) if (ch !== currentChannel) n += c;
+  return n;
+}
+
+function updateTitleBadge() {
+  const n = totalUnread();
+  document.title = n > 0 ? `(${n})Simple Talk` : 'Simple Talk';
+  updateFavicon();
+}
+
+async function jumpTo(id) {
+  if (msgById.has(mkey(id)) && rowOf(id)) { focusMessage(id); return; }
+  const { data } = await supabase.from('messages').select('*').eq('id', id).maybeSingle();
+  if (!data) { showToast('元のメッセージは見つかりませんでした'); return; }
+  await loadAround(data);
+}
+
+function focusMessage(id) {
+  const row = rowOf(id);
+  if (!row) return;
+  row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  row.classList.remove('highlight');
+  void row.offsetWidth;
+  row.classList.add('highlight');
+}
+
+async function loadPinned() {
+  const { data, error } = await supabase.from('messages').select('*')
+    .eq('channel', currentChannel)
+    .not('pinned_at', 'is', null)
+    .order('pinned_at', { ascending: false })
+    .limit(1);
+  if (error) return;
+  pinnedMsg = (data && data[0]) || null;
+  paintPinBar();
+}
+
+function paintPinBar() {
+  const bar = $('#pin-bar');
+  if (!pinnedMsg) { bar.classList.remove('open'); return; }
+  $('#pin-name').textContent = `${pinnedMsg.sender_name}さんのお知らせ`;
+  $('#pin-text').textContent = previewOf(pinnedMsg) || '画像';
+  bar.classList.add('open');
+}
+
+async function togglePin(m) {
+  const isPinned = pinnedMsg && pinnedMsg.id === m.id;
+  const { error } = await supabase.from('messages')
+    .update({ pinned_at: isPinned ? null : new Date().toISOString() })
+    .eq('id', m.id);
+  if (error) { showToast('ピン留めできませんでした: ' + error.message); return; }
+  showToast(isPinned ? 'ピン留めを外しました' : 'ピン留めしました');
+  await loadPinned();
+}
+
+$('#pin-bar').addEventListener('click', (e) => {
+  if (e.target.id === 'pin-unpin') return;
+  if (pinnedMsg) jumpTo(pinnedMsg.id);
+});
+$('#pin-unpin').addEventListener('click', async (e) => {
+  e.stopPropagation();
+  if (pinnedMsg) await togglePin(pinnedMsg);
+});
+
+function openActionMenu(m) {
+  const mine = m.sender_dbid === myDbid;
+  const overlay = document.createElement('div');
+  overlay.className = 'action-menu';
+  const sheet = document.createElement('div');
+  sheet.className = 'action-sheet';
+
+  const quick = document.createElement('div');
+  quick.className = 'quick-react';
+  for (const emoji of QUICK_EMOJI) {
+    const b = document.createElement('button');
+    b.textContent = emoji;
+    if (reactionsByMsg.get(m.id)?.get(emoji)?.has(myDbid)) b.classList.add('on');
+    b.addEventListener('click', () => { toggleReaction(m.id, emoji); overlay.remove(); });
+    quick.appendChild(b);
+  }
+  sheet.appendChild(quick);
+
+  const add = (label, icon, fn, danger) => {
+    const b = document.createElement('button');
+    b.className = 'action-item' + (danger ? ' danger' : '');
+    b.appendChild(el('span', icon));
+    b.appendChild(el('span', label));
+    b.addEventListener('click', () => { overlay.remove(); fn(); });
+    sheet.appendChild(b);
+  };
+
+  add('返信する', '↩️', () => startReply(m));
+  if (m.content) add('本文をコピー', '📋', async () => {
+    await navigator.clipboard.writeText(m.content);
+    showToast('コピーしました');
+  });
+  add('その他のリアクション', '😀', () => openEmojiPicker(m));
+  add(bookmarks.has(String(m.id)) ? 'ブックマークを外す' : 'ブックマーク', '⭐', () => {
+    const k = String(m.id);
+    bookmarks.has(k) ? bookmarks.delete(k) : bookmarks.add(k);
+    saveBookmarks();
+    const row = rowOf(m.id);
+    if (row) row.replaceWith(buildRow(m));
+    showToast(bookmarks.has(k) ? 'ブックマークしました' : 'ブックマークを外しました');
+  });
+  add('リンクをコピー', '🔗', async () => {
+    await navigator.clipboard.writeText(`${location.origin}${location.pathname}#m=${m.id}`);
+    showToast('リンクをコピーしました');
+  });
+  add(pinnedMsg && pinnedMsg.id === m.id ? 'ピン留めを外す' : 'ピン留めする', '📌', () => togglePin(m));
+  if (m.image_url && isImageName(m.file_name || m.image_url)) add('画像を開く', '🖼️', () => openLightbox(m.image_url));
+  if (m.image_url && !isImageName(m.file_name || m.image_url)) add('ファイルを開く', '📎', () => window.open(m.image_url, '_blank', 'noopener'));
+  if (mine && m.content) add('編集する', '✏️', () => startEdit(m));
+  if (mine && m.image_url) add('添付だけ削除', '📎🗑️', () => deleteImageOnly(m), true);
+  if (mine) add('削除する', '🗑️', () => deleteMessage(m.id), true);
+
+  overlay.appendChild(sheet);
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+}
+
+function openEmojiPicker(m) {
+  const sheet = openSheet('リアクションを選ぶ');
+  const grid = el('div', '', 'emoji-grid');
+  for (const emoji of PICKER_EMOJI) {
+    const b = el('button', emoji);
+    if (reactionsByMsg.get(m.id)?.get(emoji)?.has(myDbid)) b.classList.add('on');
+    b.addEventListener('click', () => { toggleReaction(m.id, emoji); closeSheet(); });
+    grid.appendChild(b);
+  }
+  sheet.appendChild(grid);
+}
+
+function startReply(m) {
+  cancelEdit();
+  replyTo = m;
+  $('#reply-label').textContent = `${m.sender_name}さんに返信`;
+  $('#reply-text').textContent = previewOf(m) || '画像';
+  $('#reply-bar').classList.add('open');
+  textInput.focus();
+}
+function cancelReply() {
+  replyTo = null;
+  $('#reply-bar').classList.remove('open');
+}
+$('#reply-cancel').addEventListener('click', cancelReply);
+
+function startEdit(m) {
+  cancelReply();
+  editingId = m.id;
+  $('#edit-text').textContent = previewOf(m);
+  $('#edit-bar').classList.add('open');
+  textInput.value = m.content;
+  autoGrow(textInput);
+  updateByteCounter();
+  textInput.focus();
+  textInput.setSelectionRange(textInput.value.length, textInput.value.length);
+}
+function cancelEdit() {
+  if (!editingId) return;
+  editingId = null;
+  $('#edit-bar').classList.remove('open');
+  textInput.value = '';
+  autoGrow(textInput);
+  updateByteCounter();
+}
+$('#edit-cancel').addEventListener('click', cancelEdit);
+
+async function deleteMessage(id) {
+  if (!confirm('このメッセージを削除しますか？')) return;
+  const row = rowOf(id);
+  const target = msgById.get(mkey(id));
+  const { error } = await supabase.from('messages').delete().eq('id', id);
+  if (error) { showToast('削除できませんでした: ' + error.message); return; }
+  if (row) row.remove();
+  msgs = msgs.filter((x) => x.id !== id);
+  msgById.delete(mkey(id));
+  if (target?.image_url) await deleteStorageObject(target.image_url, target.image_bytes);
+}
+
+async function deleteImageOnly(m) {
+  if (!m.image_url) return;
+  if (!m.content || !m.content.trim()) {
+    showToast('本文のない添付だけの投稿です。メッセージごと削除します');
+    return deleteMessage(m.id);
+  }
+  if (!confirm('添付だけを削除しますか？（本文は残ります）')) return;
+  const url = m.image_url, bytes = m.image_bytes;
+  const { error } = await supabase.from('messages')
+    .update({ image_url: null, image_bytes: null, file_name: null }).eq('id', m.id);
+  if (error) { showToast('画像を削除できませんでした: ' + error.message); return; }
+  await deleteStorageObject(url, bytes);
+  showToast('画像を削除しました');
+}
+
+async function deleteStorageObject(url, knownBytes) {
+  const marker = `/object/public/${BUCKET}/`;
+  const i = url.indexOf(marker);
+  if (i < 0) return;
+  const path = decodeURIComponent(url.slice(i + marker.length).split('?')[0]);
+  const { error } = await supabase.storage.from(BUCKET).remove([path]);
+  if (error) { console.warn('画像の削除に失敗:', error.message); return; }
+  storageUsedBytes = Math.max(0, storageUsedBytes - (Number(knownBytes) || 0));
+  applyStorageFullState();
+}
+
+textInput.addEventListener('input', () => {
+  autoGrow(textInput);
+  updateByteCounter();
+  updateMentionBox();
+  if (textInput.value) sendTyping();
+  if (!editingId) localStorage.setItem('line_chat_draft', textInput.value);
+});
+sendBtn.addEventListener('click', submit);
+textInput.addEventListener('keydown', (e) => {
+  if (mentionBox.classList.contains('open') && ['ArrowDown', 'ArrowUp', 'Enter', 'Tab', 'Escape'].includes(e.key)) {
+    if (handleMentionKey(e)) return;
+  }
+  if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+    const k = e.key.toLowerCase();
+    if (k === 'b') { e.preventDefault(); wrapSelection('**', '**'); return; }
+    if (k === 'i') { e.preventDefault(); wrapSelection('*', '*'); return; }
+    if (k === 'e') { e.preventDefault(); wrapSelection('`', '`'); return; }
+    if (k === 'x' && e.shiftKey) { e.preventDefault(); wrapSelection('~~', '~~'); return; }
+    if (k === 'z' && !textInput.value) { e.preventDefault(); undoLastSend(); return; }
+  }
+  const enterSubmits = prefs.enterSends ? (!e.shiftKey) : (e.ctrlKey || e.metaKey);
+  if (e.key === 'Enter' && enterSubmits && !e.isComposing) {
+    e.preventDefault();
+    submit();
+  } else if (e.key === 'ArrowUp' && !textInput.value && !editingId) {
+    const last = [...msgs].reverse().find((m) => m.sender_dbid === myDbid && m.content);
+    if (last) { e.preventDefault(); startEdit(last); }
+  }
+});
+
+function wrapSelection(before, after) {
+  const a = textInput.selectionStart, b = textInput.selectionEnd;
+  const v = textInput.value;
+  textInput.value = v.slice(0, a) + before + v.slice(a, b) + after + v.slice(b);
+  textInput.focus();
+  textInput.setSelectionRange(a + before.length, b + before.length);
+  autoGrow(textInput);
+  updateByteCounter();
+}
+
+async function undoLastSend() {
+  if (!lastSentId || Date.now() - lastSentAt > 30000) { showToast('取り消せる送信はありません'); return; }
+  const id = lastSentId;
+  lastSentId = null;
+  const target = msgById.get(mkey(id));
+  await supabase.from('messages').delete().eq('id', id);
+  const row = rowOf(id);
+  if (row) row.remove();
+  msgs = msgs.filter((x) => x.id !== id);
+  msgById.delete(mkey(id));
+  if (target?.content) { textInput.value = target.content; autoGrow(textInput); updateByteCounter(); }
+  if (target?.image_url) await deleteStorageObject(target.image_url, target.image_bytes);
+  showToast('送信を取り消しました');
+}
+
+function autoGrow(node) {
+  node.style.height = 'auto';
+  node.style.height = Math.min(node.scrollHeight, 120) + 'px';
+}
+function currentByteLength() {
+  return new TextEncoder().encode(textInput.value).length;
+}
+function updateByteCounter() {
+  const bytes = currentByteLength();
+  byteCounterEl.textContent = `${textInput.value.length.toLocaleString()}文字 ・ ${bytes.toLocaleString()} / ${MAX_BYTES.toLocaleString()} バイト`;
+  byteCounterEl.classList.toggle('over', bytes > MAX_BYTES);
+  sendBtn.disabled = dbFull || (bytes === 0 && !pendingImage) || bytes > MAX_BYTES;
+}
+
+async function submit() {
+  if (editingId) return saveEdit();
+  if (textInput.value.startsWith('/') && handleSlashCommand(textInput.value.trim())) return;
+  return sendMessage();
+}
+
+function handleSlashCommand(line) {
+  const [cmd, ...rest] = line.split(/\s+/);
+  const arg = rest.join(' ');
+  const clear = () => { textInput.value = ''; autoGrow(textInput); updateByteCounter(); localStorage.removeItem('line_chat_draft'); };
+  switch (cmd) {
+    case '/help':
+      clear();
+      showToast('/shrug /tableflip /me /theme /clear /top /bottom /search');
+      return true;
+    case '/shrug':      textInput.value = (arg ? arg + ' ' : '') + '¯\\_(ツ)_/¯'; sendMessage(); return true;
+    case '/tableflip':  textInput.value = (arg ? arg + ' ' : '') + '(╯°□°）╯︵ ┻━┻'; sendMessage(); return true;
+    case '/me':         if (!arg) return true; textInput.value = `*${myName} ${arg}*`; sendMessage(); return true;
+    case '/theme':
+      clear();
+      if (['light', 'dark', 'system'].includes(arg)) { localStorage.setItem(LS.THEME, arg); applyTheme(); showToast('テーマを変えました'); }
+      else showToast('/theme light | dark | system');
+      return true;
+    case '/clear':      clear(); return true;
+    case '/top':        clear(); messagesEl.scrollTo({ top: 0, behavior: 'smooth' }); return true;
+    case '/bottom':     clear(); scrollToBottom(); return true;
+    case '/search':     clear(); toggleSearch(); if (arg) { searchInput.value = arg; runSearch(); } return true;
+    default: return false;
+  }
+}
+
+async function saveEdit() {
+  const content = textInput.value;
+  if (!content.trim()) { showToast('本文が空です'); return; }
+  const id = editingId;
+  let { data, error } = await supabase.from('messages')
+    .update({ content, edited_at: new Date().toISOString() }).eq('id', id).select().maybeSingle();
+  if (error && /edited_at/.test(error.message || '')) {
+    ({ data, error } = await supabase.from('messages')
+      .update({ content }).eq('id', id).select().maybeSingle());
+    if (!error) showToast('保存しました（edited_at列が無いため「編集済み」は出ません）');
+  }
+  if (error) { showToast('編集を保存できませんでした: ' + error.message); return; }
+  cancelEdit();
+  if (data) onUpdate(data);
+  showToast('編集しました');
+}
+
+async function sendMessage() {
+  DBG.info('sendMessage', { channel: currentChannel, len: textInput.value.length, file: pendingImage?.name || null });
+  const content = textInput.value;
+  if (!content.trim() && !pendingImage) return;
+  if (dbFull) { showToast('データベースが満杯のため送信できません'); return; }
+  if (currentByteLength() > MAX_BYTES) { showToast('本文が大きすぎます（上限1024KB）'); return; }
+
+  const clientId = crypto.randomUUID();
+  const draft = {
+    id: 'temp-' + clientId,
+    client_id: clientId,
+    sender_dbid: myDbid,
+    sender_name: myName,
+    content,
+    reply_to: replyTo ? replyTo.id : null,
+    image_url: null,
+    created_at: new Date().toISOString(),
+    __pending: true,
+  };
+
+  appendRow(draft);
+  scrollToBottom();
+  const file = pendingImage;
+  textInput.value = '';
+  autoGrow(textInput);
+  clearPendingImage();
+  const replySnapshot = replyTo;
+  cancelReply();
+  updateByteCounter();
+
+  let imageUrl = null;
+  if (file) {
+    imageUrl = await uploadImage(file, draft);
+    if (imageUrl === false) return;
+  }
+
+  localStorage.removeItem('line_chat_draft');
+  const { error } = await supabase.from('messages').insert({
+    sender_dbid: myDbid,
+    sender_name: myName,
+    content,
+    reply_to: replySnapshot ? replySnapshot.id : null,
+    image_url: imageUrl,
+    image_bytes: file ? file.size : null,
+    file_name: file ? file.name : null,
+    client_id: clientId,
+    channel: currentChannel,
+  });
+
+  if (error) {
+    markDraftFailed(draft, error.message);
+    return;
+  }
+  setTimeout(() => {
+    const stale = messagesEl.querySelector(`[data-client-id="${cssEscape(clientId)}"].sending`);
+    if (stale) refreshSince();
+  }, 2500);
+}
+
+function markDraftFailed(draft, message) {
+  const row = messagesEl.querySelector(`[data-client-id="${cssEscape(draft.client_id)}"]`);
+  draft.__pending = false;
+  draft.__failed = true;
+  if (row) row.replaceWith(buildRow(draft));
+  showToast('送信できませんでした: ' + message);
+}
+
+async function retrySend(draft) {
+  const row = messagesEl.querySelector(`[data-client-id="${cssEscape(draft.client_id)}"]`);
+  if (row) row.remove();
+  textInput.value = draft.content || '';
+  autoGrow(textInput);
+  updateByteCounter();
+  await sendMessage();
+}
+
+$('#attach-btn').addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', () => {
+  if (fileInput.files[0]) setPendingImage(fileInput.files[0]);
+  fileInput.value = '';
+});
+$('#image-cancel').addEventListener('click', clearPendingImage);
+
+async function setPendingImage(file) {
+  if (storageFull) { showToast('ストレージが満杯に近いため、いまは画像を送れません'); return; }
+  if (file.size > MAX_IMAGE_BYTES) { showToast('ファイルは5MBまでです'); return; }
+
+  const isImg = file.type.startsWith('image/');
+  const original = file.size;
+  const shrunk = isImg ? await shrinkImage(file) : file;
+  pendingImage = shrunk;
+  const thumb = $('#image-thumb');
+  if (isImg) {
+    thumb.src = URL.createObjectURL(shrunk);
+    thumb.style.display = '';
+  } else {
+    thumb.style.display = 'none';
+  }
+  $('#image-name').textContent = (isImg && shrunk.size < original * 0.95)
+    ? `${file.name}（${humanSize(original)} → ${humanSize(shrunk.size)} に圧縮）`
+    : `${fileIcon(file.name)} ${file.name}（${humanSize(shrunk.size)}）`;
+  $('#image-bar').classList.add('open');
+  DBG.info('attach', { name: file.name, type: file.type, size: shrunk.size });
+  updateByteCounter();
+}
+
+async function shrinkImage(file) {
+  if (file.type === 'image/gif') return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, IMAGE_MAX_EDGE / Math.max(bitmap.width, bitmap.height));
+    const w = Math.round(bitmap.width * scale);
+    const h = Math.round(bitmap.height * scale);
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    bitmap.close?.();
+    const blob = await new Promise((res) => canvas.toBlob(res, 'image/jpeg', IMAGE_QUALITY));
+    if (!blob || blob.size >= file.size) return file;
+    const name = file.name.replace(/\.[^.]+$/, '') + '.jpg';
+    return new File([blob], name, { type: 'image/jpeg' });
+  } catch (_) {
+    return file;
+  }
+}
+function clearPendingImage() {
+  pendingImage = null;
+  $('#image-bar').classList.remove('open');
+  updateByteCounter();
+}
+
+async function refreshStorageUsage() {
+  const { data, error } = await supabase.from('storage_usage').select('*').maybeSingle();
+  if (error || !data) return;
+  storageUsedBytes = Number(data.total_bytes) || 0;
+  applyStorageFullState();
+}
+
+function applyStorageFullState() {
+  const wasFull = storageFull;
+  storageFull = storageUsedBytes >= (STORAGE_LIMIT_BYTES - STORAGE_SAFE_MARGIN);
+  const btn = $('#attach-btn');
+  btn.disabled = storageFull;
+  btn.title = storageFull ? 'ストレージが満杯のため画像は送れません' : '画像を送る';
+  btn.style.opacity = storageFull ? '.4' : '';
+  if (storageFull && !wasFull) {
+    showToast('ストレージが上限に近づいたため、しばらく画像を送れません');
+    if (pendingImage) clearPendingImage();
+  }
+}
+
+async function uploadImage(file, draft) {
+  const ext = (file.name.split('.').pop() || 'png').toLowerCase().slice(0, 5);
+  const path = `${myDbid}/${Date.now()}-${crypto.randomUUID().slice(0, 8)}.${ext}`;
+  const { error } = await supabase.storage.from(BUCKET).upload(path, file, {
+    cacheControl: '31536000', contentType: file.type, upsert: false,
+  });
+  if (error) {
+    markDraftFailed(draft, error.message + '（schema.sql の Storage 設定を実行してください）');
+    return false;
+  }
+  storageUsedBytes += file.size;
+  applyStorageFullState();
+  return supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
+}
+
+document.addEventListener('paste', (e) => {
+  const item = [...(e.clipboardData?.items || [])].find((i) => i.type.startsWith('image/'));
+  if (item) setPendingImage(item.getAsFile()).then(() => { if (pendingImage) showToast('画像を添付しました'); });
+});
+let dragDepth = 0;
+window.addEventListener('dragenter', (e) => {
+  if (![...(e.dataTransfer?.types || [])].includes('Files')) return;
+  dragDepth++; $('#drop-hint').classList.add('show');
+});
+window.addEventListener('dragleave', () => { if (--dragDepth <= 0) $('#drop-hint').classList.remove('show'); });
+window.addEventListener('dragover', (e) => e.preventDefault());
+window.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dragDepth = 0; $('#drop-hint').classList.remove('show');
+  const file = e.dataTransfer?.files?.[0];
+  if (file) setPendingImage(file);
+});
+
+function openLightbox(url) {
+  lightbox.querySelector('img').src = url;
+  lightbox.querySelector('.lb-dl').href = url;
+  lightbox.classList.add('open');
+  history.pushState({ lightbox: true }, '');
+}
+function closeLightbox() {
+  lightbox.classList.remove('open');
+  lightbox.querySelector('img').src = '';
+}
+lightbox.addEventListener('click', (e) => { if (e.target !== lightbox.querySelector('.lb-dl')) history.back(); });
+window.addEventListener('popstate', () => { if (lightbox.classList.contains('open')) closeLightbox(); });
+
+let mentionCandidates = [];
+let mentionIndex = 0;
+
+function currentMentionQuery() {
+  const pos = textInput.selectionStart;
+  const before = textInput.value.slice(0, pos);
+  const mt = before.match(/(?:^|\s)@([^\s@]{0,20})$/);
+  return mt ? { query: mt[1], start: pos - mt[1].length - 1, end: pos } : null;
+}
+
+function updateMentionBox() {
+  const ctx = currentMentionQuery();
+  if (!ctx) { mentionBox.classList.remove('open'); return; }
+  const q = ctx.query.toLowerCase();
+  mentionCandidates = [...knownUsers.entries()]
+    .filter(([d, u]) => d !== myDbid && u.name && u.name.toLowerCase().includes(q))
+    .sort((a, b) => Number(b[1].online) - Number(a[1].online))
+    .slice(0, 6);
+  if (!mentionCandidates.length) { mentionBox.classList.remove('open'); return; }
+  mentionIndex = 0;
+  paintMentionBox();
+  mentionBox.classList.add('open');
+}
+
+function paintMentionBox() {
+  mentionBox.textContent = '';
+  mentionCandidates.forEach(([dbid, u], i) => {
+    const item = document.createElement('div');
+    item.className = 'mention-item' + (i === mentionIndex ? ' active' : '');
+    const av = el('div', (u.name || '?').slice(0, 1).toUpperCase(), 'avatar');
+    av.style.background = u.color || colorForDbid(dbid);
+    item.appendChild(av);
+    item.appendChild(el('span', u.name));
+    if (u.online) item.appendChild(el('span', 'オンライン', 'badge'));
+    item.addEventListener('mousedown', (e) => { e.preventDefault(); applyMention(i); });
+    mentionBox.appendChild(item);
+  });
+}
+
+function handleMentionKey(e) {
+  if (e.key === 'Escape') { mentionBox.classList.remove('open'); e.preventDefault(); return true; }
+  if (e.key === 'ArrowDown') { mentionIndex = (mentionIndex + 1) % mentionCandidates.length; paintMentionBox(); e.preventDefault(); return true; }
+  if (e.key === 'ArrowUp') { mentionIndex = (mentionIndex - 1 + mentionCandidates.length) % mentionCandidates.length; paintMentionBox(); e.preventDefault(); return true; }
+  if (e.key === 'Enter' || e.key === 'Tab') { applyMention(mentionIndex); e.preventDefault(); return true; }
+  return false;
+}
+
+function applyMention(i) {
+  const ctx = currentMentionQuery();
+  const pick = mentionCandidates[i];
+  if (!ctx || !pick) return;
+  const name = pick[1].name;
+  const v = textInput.value;
+  textInput.value = v.slice(0, ctx.start) + '@' + name + ' ' + v.slice(ctx.end);
+  const caret = ctx.start + name.length + 2;
+  textInput.setSelectionRange(caret, caret);
+  mentionBox.classList.remove('open');
+  textInput.focus();
+  updateByteCounter();
+}
+
+$('#search-btn').addEventListener('click', toggleSearch);
+$('#search-close').addEventListener('click', closeSearch);
+searchInput.addEventListener('input', debounce(runSearch, 260));
+
+function toggleSearch() {
+  if (searchBar.classList.contains('open')) closeSearch();
+  else { searchBar.classList.add('open'); searchInput.focus(); paintSearchChips(); }
+}
+function closeSearch() {
+  searchBar.classList.remove('open');
+  searchResults.classList.remove('open');
+  $('#search-chips').style.display = 'none';
+  searchInput.value = '';
+}
+
+function paintSearchChips() {
+  const box = $('#search-chips');
+  box.textContent = '';
+  box.style.display = 'flex';
+  const mk = (label, on, fn) => {
+    const c = el('button', label, 'chip' + (on ? ' on' : ''));
+    c.addEventListener('click', fn);
+    box.appendChild(c);
+  };
+  mk('自分のみ', searchFilterMine, () => { searchFilterMine = !searchFilterMine; paintSearchChips(); runSearch(); });
+  mk('画像つき', searchFilterImage, () => { searchFilterImage = !searchFilterImage; paintSearchChips(); runSearch(); });
+  if (!searchInput.value) {
+    for (const h of searchHistory.slice(0, 6)) {
+      mk(h, false, () => { searchInput.value = h; paintSearchChips(); runSearch(); });
+    }
+  }
+}
+
+function rememberSearch(q) {
+  searchHistory = [q, ...searchHistory.filter((x) => x !== q)].slice(0, 8);
+  localStorage.setItem('line_chat_searches', JSON.stringify(searchHistory));
+}
+
+async function runSearch() {
+  const q = searchInput.value.trim();
+  if (q.length < 1) { searchResults.classList.remove('open'); return; }
+  const token = ++searchAbort;
+  searchResults.classList.add('open');
+  searchResults.innerHTML = '<div class="sr-empty">検索中…</div>';
+
+  const pattern = '%' + q.replace(/[%_]/g, (c) => '\\' + c) + '%';
+  let query = supabase.from('messages').select('*').eq('channel', currentChannel).ilike('content', pattern);
+  if (searchFilterMine) query = query.eq('sender_dbid', myDbid);
+  if (searchFilterImage) query = query.not('image_url', 'is', null);
+  const { data, error } = await query.order('created_at', { ascending: false }).limit(50);
+  if (q) rememberSearch(q);
+
+  if (token !== searchAbort) return;
+  if (error) { searchResults.innerHTML = `<div class="sr-empty">検索できませんでした<br>${escapeHtml(error.message)}</div>`; return; }
+  if (!data.length) { searchResults.innerHTML = '<div class="sr-empty">見つかりませんでした。<br>別のことばで試してみてください。</div>'; return; }
+
+  searchResults.textContent = '';
+  const head = el('div', `${data.length}件${data.length === 50 ? '以上' : ''}見つかりました`, 'sr-empty');
+  head.style.padding = '4px 4px 10px';
+  searchResults.appendChild(head);
+
+  for (const m of data) {
+    const item = document.createElement('div');
+    item.className = 'sr-item';
+    const h = document.createElement('div');
+    h.className = 'sr-head';
+    h.appendChild(el('span', m.sender_name));
+    h.appendChild(el('span', `${dayLabel(m.created_at)} ${timeLabel(m.created_at)}`));
+    item.appendChild(h);
+    const body = el('div', '', 'sr-body');
+    highlightInto(body, snippetAround(m.content, q), q);
+    item.appendChild(body);
+    item.addEventListener('click', async () => {
+      closeSearch();
+      await jumpTo(m.id);
+    });
+    searchResults.appendChild(item);
+  }
+}
+
+function snippetAround(content, q) {
+  const text = (content || '').replace(/\s+/g, ' ');
+  const i = text.toLowerCase().indexOf(q.toLowerCase());
+  if (i < 0) return text.slice(0, 120);
+  const from = Math.max(0, i - 40);
+  return (from > 0 ? '…' : '') + text.slice(from, from + 140) + (from + 140 < text.length ? '…' : '');
+}
+
+function highlightInto(target, text, q) {
+  const lower = text.toLowerCase();
+  const needle = q.toLowerCase();
+  let pos = 0;
+  while (true) {
+    const i = lower.indexOf(needle, pos);
+    if (i < 0 || !needle) break;
+    target.appendChild(document.createTextNode(text.slice(pos, i)));
+    target.appendChild(el('mark', text.slice(i, i + needle.length)));
+    pos = i + needle.length;
+  }
+  target.appendChild(document.createTextNode(text.slice(pos)));
+}
+
+function debounce(fn, ms) {
+  let t;
+  return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+}
+
+$('#members-open').addEventListener('click', openPeople);
+
+function openPeople() {
+  const sheet = openSheet('参加者');
+  const online = [], offline = [];
+  for (const [dbid, u] of knownUsers) (u.online ? online : offline).push([dbid, u]);
+  online.sort((a, b) => a[1].name.localeCompare(b[1].name, 'ja'));
+  offline.sort((a, b) => a[1].name.localeCompare(b[1].name, 'ja'));
+
+  const section = (label, list, isOnline) => {
+    if (!list.length) return;
+    sheet.appendChild(el('div', `${label}（${list.length}）`, 'group-label'));
+    const box = el('div', '', 'people-list');
+    for (const [dbid, u] of list) {
+      const p = el('div', '', 'person' + (isOnline ? ' online' : ''));
+      const av = el('div', (u.name || '?').slice(0, 1).toUpperCase(), 'avatar');
+      av.style.background = u.color || colorForDbid(dbid);
+      p.appendChild(av);
+      const who = el('div', '', 'who');
+      who.appendChild(el('div', u.name + (dbid === myDbid ? '（あなた）' : '')));
+      if (u.real) who.appendChild(el('div', u.real, 'si-sub'));
+      p.appendChild(who);
+      p.appendChild(el('span', isOnline ? '● オンライン' : 'オフライン', 'badge'));
+      if (dbid !== myDbid) {
+        p.style.cursor = 'pointer';
+        p.addEventListener('click', () => {
+          closeSheet();
+          switchChannel(dmKey(myDbid, dbid));
+        });
+      }
+      box.appendChild(p);
+    }
+    sheet.appendChild(box);
+  };
+  section('いま参加中', online, true);
+  section('過去に参加', offline, false);
+}
+
+$('#settings-btn').addEventListener('click', openSettings);
+
+function openSettings() {
+  const sheet = openSheet('設定');
+
+  sheet.appendChild(el('label', 'テーマ'));
+  sheet.appendChild(segmented(
+    [['system', 'デバイスに合わせる'], ['light', 'ライト'], ['dark', 'ダーク']],
+    localStorage.getItem(LS.THEME) || 'system',
+    (v) => { localStorage.setItem(LS.THEME, v); applyTheme(); }
+  ));
+
+  sheet.appendChild(el('label', '文字の大きさ'));
+  sheet.appendChild(segmented(
+    [['s', '小'], ['m', '標準'], ['l', '大']],
+    localStorage.getItem(LS.FONT) || 'm',
+    (v) => { localStorage.setItem(LS.FONT, v); applyFontSize(); }
+  ));
+
+  sheet.appendChild(el('label', '表示'));
+  const toggles = [
+    ['group', '連続した発言をまとめる'],
+    ['relTime', '時刻を「◯分前」で表示'],
+    ['showSeconds', '秒まで表示'],
+    ['compact', 'コンパクト表示'],
+    ['hideAvatar', 'アイコンを隠す'],
+    ['noDots', '背景の模様をなくす'],
+    ['contrast', '文字を濃くする'],
+    ['shortLinks', 'リンクをドメインだけ表示'],
+    ['jumbo', '絵文字だけの発言を大きく'],
+    ['enterSends', 'Enterで送信（オフだと改行）'],
+  ];
+  for (const [key, label] of toggles) {
+    sheet.appendChild(switchRow(label, !!prefs[key], (on) => { setPref(key, on); renderAll(); }));
+  }
+
+  sheet.appendChild(el('label', '背景画像（URL）'));
+  const bgField = document.createElement('input');
+  bgField.type = 'text';
+  bgField.placeholder = 'https://example.com/wallpaper.jpg';
+  bgField.value = prefs.bgUrl || '';
+  sheet.appendChild(bgField);
+  const bgRow = el('div', '', 'chip-row');
+  bgRow.style.padding = '6px 0 0';
+  const applyBg = el('button', '適用', 'chip');
+  applyBg.addEventListener('click', () => {
+    const v = bgField.value.trim();
+    if (v && !/^https?:\/\//.test(v)) { showToast('http(s) で始まるURLを入れてください'); return; }
+    setPref('bgUrl', v);
+    showToast(v ? '背景を設定しました' : '背景を解除しました');
+  });
+  const clearBg = el('button', '解除', 'chip');
+  clearBg.addEventListener('click', () => { bgField.value = ''; setPref('bgUrl', ''); showToast('背景を解除しました'); });
+  bgRow.append(applyBg, clearBg);
+  sheet.appendChild(bgRow);
+
+  sheet.appendChild(el('label', '背景の暗さ'));
+  sheet.appendChild(segmented(
+    [[0, 'なし'], [0.25, '少し暗く'], [0.45, '暗く'], [0.65, 'かなり暗く']].map(([v, l]) => [String(v), l]),
+    String(prefs.bgDim || 0),
+    (v) => setPref('bgDim', Number(v))
+  ));
+
+  sheet.appendChild(el('label', '書体'));
+  sheet.appendChild(segmented(
+    [['default', '標準'], ['round', '丸ゴシック'], ['mincho', '明朝'], ['mono', '等幅']],
+    prefs.font || 'default',
+    (v) => setPref('font', v)
+  ));
+
+  sheet.appendChild(el('label', 'ふきだしの角'));
+  sheet.appendChild(segmented(
+    [['4', '角ばる'], ['10', '控えめ'], ['16', '標準'], ['22', '丸い']],
+    String(prefs.radius ?? 16),
+    (v) => setPref('radius', Number(v))
+  ));
+
+  sheet.appendChild(el('label', '自分のふきだしの色'));
+  const mineRow = el('div', '', 'chip-row');
+  mineRow.style.padding = '0';
+  for (const [name, hex] of [['標準', ''], ['空', '#9fd8ff'], ['桃', '#ffc2d6'], ['黄', '#ffe08a'], ['紫', '#d4c6ff'], ['灰', '#dfe4e8']]) {
+    const c = el('button', name, 'chip' + ((prefs.mineColor || '') === hex ? ' on' : ''));
+    c.addEventListener('click', () => {
+      setPref('mineColor', hex);
+      mineRow.querySelectorAll('.chip').forEach((n) => n.classList.remove('on'));
+      c.classList.add('on');
+    });
+    mineRow.appendChild(c);
+  }
+  sheet.appendChild(mineRow);
+
+  sheet.appendChild(el('label', 'アクセントカラー'));
+  const colorRow = el('div', '', 'chip-row');
+  colorRow.style.padding = '0';
+  for (const [name, hex] of [['標準', ''], ['青', '#3f8ae0'], ['紫', '#7c6ce0'], ['桃', '#d4569f'], ['橙', '#f4a259'], ['黒', '#333a40']]) {
+    const c = el('button', name, 'chip' + (prefs.accent === hex ? ' on' : ''));
+    c.addEventListener('click', () => {
+      setPref('accent', hex);
+      colorRow.querySelectorAll('.chip').forEach((n) => n.classList.remove('on'));
+      c.classList.add('on');
+      updateFavicon();
+    });
+    colorRow.appendChild(c);
+  }
+  sheet.appendChild(colorRow);
+
+  sheet.appendChild(el('label', '便利機能'));
+  const tools = [
+    ['ブックマークを見る', openBookmarks],
+    ['画像一覧を見る', openGallery],
+    ['日付にジャンプ', openDateJump],
+    ['定型文を編集', openSnippets],
+    ['全画面表示', toggleFullscreen],
+  ];
+  for (const [label, fn] of tools) {
+    const b = el('button', label, 'row-btn ghost');
+    b.addEventListener('click', fn);
+    sheet.appendChild(b);
+  }
+  sheet.appendChild(switchRow('画面を消えないようにする', !!wakeLock, toggleWakeLock));
+
+  sheet.appendChild(el('label', 'お知らせ'));
+  sheet.appendChild(switchRow('自分宛て（メンション）だけ通知', !!prefs.mentionOnly, (on) => setPref('mentionOnly', on)));
+  const muteRow = el('div', '', 'chip-row');
+  muteRow.style.padding = '0';
+  for (const [label, mins] of [['解除', 0], ['30分', 30], ['1時間', 60], ['8時間', 480]]) {
+    const c = el('button', label, 'chip');
+    c.addEventListener('click', () => {
+      setPref('muteUntil', mins ? Date.now() + mins * 60000 : 0);
+      showToast(mins ? `${label}ミュートしました` : 'ミュートを解除しました');
+    });
+    muteRow.appendChild(c);
+  }
+  sheet.appendChild(muteRow);
+  const soundRow = switchRow('新着メッセージの音', localStorage.getItem(LS.SOUND) !== '0', (on) => {
+    localStorage.setItem(LS.SOUND, on ? '1' : '0');
+    if (on) playPing();
+  });
+  sheet.appendChild(soundRow);
+  const notifGranted = ('Notification' in window) && Notification.permission === 'granted';
+  const notifBtn = el('button', notifGranted ? '通知は有効です' : 'デスクトップ通知を有効にする', 'row-btn ghost');
+  notifBtn.addEventListener('click', async () => {
+    if (!('Notification' in window)) { showToast('この端末は通知に対応していません'); return; }
+    const perm = await Notification.requestPermission();
+    showToast(perm === 'granted' ? '通知を有効にしました' : '通知は許可されませんでした');
+    if (perm === 'granted') notifBtn.textContent = '通知は有効です';
+  });
+  sheet.appendChild(notifBtn);
+
+  sheet.appendChild(el('label', 'あなたのID（dbid）'));
+  const idBox = el('div', '', 'id-display');
+  idBox.appendChild(el('span', myDbid));
+  const copyBtn = el('button', 'コピー');
+  copyBtn.addEventListener('click', async () => {
+    await navigator.clipboard.writeText(myDbid);
+    showToast('IDをコピーしました');
+  });
+  idBox.appendChild(copyBtn);
+  sheet.appendChild(idBox);
+
+  sheet.appendChild(el('label', '本名（メンバー一覧に表示）'));
+  const realField = document.createElement('input');
+  realField.type = 'text'; realField.maxLength = 30; realField.value = myReal || '';
+  sheet.appendChild(realField);
+  const realBtn = el('button', '本名を保存', 'row-btn ghost');
+  realBtn.addEventListener('click', async () => {
+    const v = realField.value.trim();
+    const { error } = await supabase.from('users').update({ real_name: v }).eq('dbid', myDbid);
+    if (error) { showToast('保存できませんでした: ' + error.message); return; }
+    myReal = v;
+    localStorage.setItem('line_chat_real', v);
+    const me = knownUsers.get(myDbid) || {};
+    knownUsers.set(myDbid, { ...me, real: v });
+    showToast('本名を保存しました');
+  });
+  sheet.appendChild(realBtn);
+
+  sheet.appendChild(el('label', '表示名'));
+  const nameField = document.createElement('input');
+  nameField.type = 'text'; nameField.maxLength = 20; nameField.value = myName;
+  sheet.appendChild(nameField);
+  const renameBtn = el('button', '表示名を変える', 'row-btn primary');
+  renameBtn.addEventListener('click', async () => {
+    const newName = nameField.value.trim();
+    if (!newName || newName === myName) { closeSheet(); return; }
+    const { error } = await supabase.from('users')
+      .update({ display_name: newName, updated_at: new Date().toISOString() })
+      .eq('dbid', myDbid);
+    if (error) {
+      showToast(error.code === '23505' ? 'その表示名は使われています' : '変えられませんでした');
+      return;
+    }
+    myName = newName;
+    localStorage.setItem(LS.NAME, myName);
+    knownUsers.set(myDbid, { ...(knownUsers.get(myDbid) || {}), name: myName });
+    await trackPresence();
+    await refreshNamesLocally();
+    showToast('表示名を変えました');
+    closeSheet();
+  });
+  sheet.appendChild(renameBtn);
+
+  const regenBtn = el('button', 'IDを再発行する（別の参加者として扱われます）', 'row-btn ghost');
+  regenBtn.addEventListener('click', async () => {
+    if (!confirm('IDを再発行すると、これまでの発言は「自分の発言」として扱われなくなる場合があります。よろしいですか？')) return;
+    const newDbid = crypto.randomUUID();
+    const { error } = await supabase.from('users')
+      .update({ dbid: newDbid, avatar_color: colorForDbid(newDbid), updated_at: new Date().toISOString() })
+      .eq('dbid', myDbid);
+    if (error) { showToast('再発行できませんでした: ' + error.message); return; }
+    myDbid = newDbid;
+    myColor = colorForDbid(newDbid);
+    localStorage.setItem(LS.DBID, myDbid);
+    closeSheet();
+    showToast('新しいIDを発行しました');
+    subscribePresence();
+    await loadLatest();
+  });
+  sheet.appendChild(regenBtn);
+
+  sheet.appendChild(el('label', 'この部屋の記録'));
+  const grid = el('div', '', 'stat-grid');
+  const s1 = el('div', '', 'stat'); s1.appendChild(el('b', '…')); s1.appendChild(el('span', '総メッセージ'));
+  const s2 = el('div', '', 'stat'); s2.appendChild(el('b', '…')); s2.appendChild(el('span', 'あなたの発言'));
+  const s3 = el('div', '', 'stat'); s3.appendChild(el('b', String(knownUsers.size))); s3.appendChild(el('span', '参加者'));
+  grid.append(s1, s2, s3);
+  sheet.appendChild(grid);
+  (async () => {
+    const all = await supabase.from('messages').select('id', { count: 'exact', head: true });
+    const mine = await supabase.from('messages').select('id', { count: 'exact', head: true }).eq('sender_dbid', myDbid);
+    s1.querySelector('b').textContent = (all.count ?? 0).toLocaleString();
+    s2.querySelector('b').textContent = (mine.count ?? 0).toLocaleString();
+  })();
+
+  sheet.appendChild(el('label', '開発者向け'));
+  sheet.appendChild(switchRow('デバッグモード（動作ログを記録）', DBG.on, (on) => {
+    DBG.on = on;
+    localStorage.setItem('line_chat_debug', on ? '1' : '0');
+    DBG.paintBadge();
+    DBG.info('debug', on ? '有効にしました' : '無効にしました');
+    showToast(on ? 'デバッグモードを有効にしました' : '無効にしました');
+  }));
+  const dbgOpen = el('button', 'デバッグログを見る', 'row-btn ghost');
+  dbgOpen.addEventListener('click', openDebugPanel);
+  sheet.appendChild(dbgOpen);
+
+  sheet.appendChild(el('label', '容量'));
+  const mb = (n) => (n / (1024 * 1024)).toFixed(0);
+
+  const storageLine = el('div', '画像ストレージ: 確認中…', 'bar-text');
+  sheet.appendChild(storageLine);
+  refreshStorageUsage().then(() => {
+    storageLine.textContent = `画像ストレージ: ${mb(storageUsedBytes)}MB / ${mb(STORAGE_LIMIT_BYTES)}MB`
+      + (storageFull ? '（満杯のため画像送信を停止中）' : '');
+  });
+
+  const dbLine = el('div', 'データベース: 確認中…', 'bar-text');
+  dbLine.style.marginBottom = '4px';
+  sheet.appendChild(dbLine);
+  refreshDbUsage().then(() => {
+    dbLine.textContent = dbUsedBytes
+      ? `データベース: ${mb(dbUsedBytes)}MB / ${mb(DB_LIMIT_BYTES)}MB` + (dbFull ? '（満杯のため送信を停止中）' : '')
+      : 'データベース: 取得できません（schema.sql の db_usage() を実行してください）';
+  });
+
+  const cleanBtn = el('button', '使われていない画像を掃除する', 'row-btn ghost');
+  cleanBtn.addEventListener('click', () => cleanupOrphanImages(cleanBtn));
+  sheet.appendChild(cleanBtn);
+
+  const exportBtn = el('button', 'トークログを保存する', 'row-btn ghost');
+  exportBtn.addEventListener('click', () => exportLog(exportBtn));
+  sheet.appendChild(exportBtn);
+
+  const delImgBtn = el('button', '自分が送った画像をすべて削除', 'row-btn danger');
+  delImgBtn.addEventListener('click', () => bulkDeleteMine(true));
+  sheet.appendChild(delImgBtn);
+
+  const delAllBtn = el('button', '自分の発言をすべて削除', 'row-btn danger');
+  delAllBtn.addEventListener('click', () => bulkDeleteMine(false));
+  sheet.appendChild(delAllBtn);
+
+  const wipeBtn = el('button', '部屋のデータを全消去（全員ぶん）', 'row-btn danger');
+  wipeBtn.addEventListener('click', wipeRoom);
+  sheet.appendChild(wipeBtn);
+
+  sheet.appendChild(el('label', '時間帯ごとの投稿'));
+  const graph = el('div', '', 'hour-graph');
+  sheet.appendChild(graph);
+  const labels = el('div', '', 'hour-labels');
+  labels.append(el('span', '0時'), el('span', '6時'), el('span', '12時'), el('span', '18時'), el('span', '23時'));
+  sheet.appendChild(labels);
+  (async () => {
+    const { data } = await supabase.from('messages').select('created_at')
+      .order('created_at', { ascending: false }).limit(2000);
+    const buckets = new Array(24).fill(0);
+    for (const m of data || []) buckets[new Date(m.created_at).getHours()]++;
+    const max = Math.max(1, ...buckets);
+    graph.textContent = '';
+    buckets.forEach((n, h) => {
+      const bar = el('div', '', 'hb');
+      bar.style.height = Math.round((n / max) * 100) + '%';
+      bar.title = `${h}時台: ${n}件`;
+      graph.appendChild(bar);
+    });
+  })();
+
+  const leaveBtn = el('button', 'この端末のデータを消す', 'row-btn danger');
+  leaveBtn.addEventListener('click', () => {
+    if (!confirm('この端末に保存したID・表示名・設定を消して、入室画面に戻ります。サーバー上の発言は残ります。')) return;
+    Object.values(LS).forEach((k) => localStorage.removeItem(k));
+    location.reload();
+  });
+  sheet.appendChild(leaveBtn);
+}
+
+async function refreshNamesLocally() {
+  const { data } = await supabase.from('messages').select('*')
+    .in('id', msgs.map((m) => m.id).slice(0, 200));
+  for (const m of data || []) { msgById.set(mkey(m.id), m); const i = msgs.findIndex((x) => x.id === m.id); if (i >= 0) msgs[i] = m; }
+  renderAll();
+}
+
+let currentSheet = null;
+function openSheet(title) {
+  closeSheet();
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  const sheet = document.createElement('div');
+  sheet.className = 'modal-sheet';
+  const x = el('button', '✕', 'close-x');
+  x.setAttribute('aria-label', '閉じる');
+  x.addEventListener('click', closeSheet);
+  sheet.appendChild(x);
+  sheet.appendChild(el('h2', title));
+  overlay.appendChild(sheet);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeSheet(); });
+  document.body.appendChild(overlay);
+  currentSheet = overlay;
+  return sheet;
+}
+function closeSheet() {
+  if (currentSheet) currentSheet.remove();
+  currentSheet = null;
+}
+
+function segmented(options, value, onPick) {
+  const box = el('div', '', 'seg');
+  for (const [val, label] of options) {
+    const b = el('button', label);
+    if (val === value) b.classList.add('on');
+    b.addEventListener('click', () => {
+      box.querySelectorAll('button').forEach((n) => n.classList.remove('on'));
+      b.classList.add('on');
+      onPick(val);
+    });
+    box.appendChild(b);
+  }
+  return box;
+}
+
+function switchRow(label, on, onToggle) {
+  const row = el('div', '', 'switch-row');
+  row.appendChild(el('span', label));
+  const sw = el('div', '', 'switch' + (on ? ' on' : ''));
+  sw.setAttribute('role', 'switch');
+  sw.tabIndex = 0;
+  const flip = () => {
+    on = !on;
+    sw.classList.toggle('on', on);
+    onToggle(on);
+  };
+  sw.addEventListener('click', flip);
+  sw.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); flip(); } });
+  row.appendChild(sw);
+  return row;
+}
+
+
+function paintSide() {
+  const list = $('#side-list');
+  list.textContent = '';
+
+  list.appendChild(el('div', 'ルーム', 'side-label'));
+  list.appendChild(sideItem({
+    key: 'main', icon: '👥', color: '#06c755', name: 'みんなの部屋',
+    sub: previewOfChannel('main'),
+  }));
+
+  list.appendChild(el('div', 'ダイレクトメッセージ', 'side-label'));
+  const people = [...knownUsers.entries()]
+    .filter(([d]) => d !== myDbid)
+    .sort((a, b) => Number(b[1].online) - Number(a[1].online) || String(a[1].name).localeCompare(String(b[1].name), 'ja'));
+
+  if (!people.length) {
+    list.appendChild(el('div', 'まだ他の参加者がいません', 'sr-empty'));
+    return;
+  }
+  for (const [dbid, u] of people) {
+    const ch = dmKey(myDbid, dbid);
+    list.appendChild(sideItem({
+      key: ch, initial: (u.name || '?').slice(0, 1).toUpperCase(),
+      color: u.color || colorForDbid(dbid), name: u.name,
+      sub: previewOfChannel(ch) || u.real || (u.online ? 'オンライン' : 'オフライン'),
+      online: u.online,
+    }));
+  }
+}
+
+function previewOfChannel(ch) {
+  const m = lastMsgByChannel.get(ch);
+  return m ? `${m.sender_dbid === myDbid ? 'あなた: ' : ''}${previewOf(m) || '画像'}` : '';
+}
+
+function sideItem({ key, icon, initial, color, name, sub, online }) {
+  const item = el('div', '', 'side-item' + (key === currentChannel ? ' active' : ''));
+  const av = el('div', icon || initial || '?', 'avatar');
+  av.style.background = color;
+  item.appendChild(av);
+  const body = el('div', '', 'si-body');
+  body.appendChild(el('div', name, 'si-name'));
+  if (sub) body.appendChild(el('div', sub, 'si-sub'));
+  item.appendChild(body);
+  const n = unreadByChannel.get(key) || 0;
+  if (n > 0 && key !== currentChannel) item.appendChild(el('span', String(Math.min(n, 99)), 'si-badge'));
+  else if (online) item.appendChild(el('span', '', 'si-dot'));
+  item.addEventListener('click', () => switchChannel(key));
+  return item;
+}
+
+async function switchChannel(ch) {
+  DBG.info('switchChannel', ch);
+  document.body.classList.add('show-talk');
+  if (ch === currentChannel) { paintSide(); return; }
+  reads[currentChannel] = lastReadAt;
+  localStorage.setItem('line_chat_reads', JSON.stringify(reads));
+
+  currentChannel = ch;
+  unreadByChannel.set(ch, 0);
+  unreadCount = 0;
+  lastReadAt = reads[ch] || null;
+  unreadBoundary = lastReadAt;
+  replyTo = null; cancelEdit(); clearPendingImage();
+  $('#reply-bar').classList.remove('open');
+  closeSearch();
+
+  const dm = isDm(ch);
+  $('#room-title').textContent = channelTitle(ch);
+  $('#room-icon').textContent = dm ? (channelTitle(ch) || '?').slice(0, 1).toUpperCase() : '👥';
+  $('#room-icon').style.background = dm ? colorForDbid(dmPartner(ch)) : '';
+  $('#member-text').textContent = dm ? '1対1のトーク' : '接続中…';
+  textInput.placeholder = dm ? `${channelTitle(ch)}さんへメッセージ` : 'メッセージを入力';
+
+  paintSide();
+  updateJumpButton();
+  await loadLatest();
+  await loadPinned();
+}
+
+$('#side-settings').addEventListener('click', openSettings);
+$('#back-btn').addEventListener('click', () => document.body.classList.remove('show-talk'));
+
+(function setupSplitter() {
+  const sp = $('#splitter');
+  let dragging = false;
+  const move = (x) => {
+    const w = Math.max(180, Math.min(window.innerWidth * 0.6, x));
+    document.documentElement.style.setProperty('--side-w', w + 'px');
+    localStorage.setItem('line_chat_sidew', String(w));
+  };
+  const saved = localStorage.getItem('line_chat_sidew');
+  if (saved) document.documentElement.style.setProperty('--side-w', saved + 'px');
+  sp.addEventListener('mousedown', (e) => { dragging = true; sp.classList.add('dragging'); e.preventDefault(); });
+  window.addEventListener('mousemove', (e) => { if (dragging) move(e.clientX); });
+  window.addEventListener('mouseup', () => { dragging = false; sp.classList.remove('dragging'); });
+  sp.addEventListener('touchstart', () => { dragging = true; }, { passive: true });
+  window.addEventListener('touchmove', (e) => { if (dragging) move(e.touches[0].clientX); }, { passive: true });
+  window.addEventListener('touchend', () => { dragging = false; });
+})();
+
+async function loadChannelPreviews() {
+  const { data } = await supabase.from('messages').select('*')
+    .order('created_at', { ascending: false }).limit(300);
+  for (const m of data || []) {
+    const ch = m.channel || 'main';
+    if (isDm(ch) && !ch.includes(myDbid)) continue;
+    if (!lastMsgByChannel.has(ch)) lastMsgByChannel.set(ch, m);
+    if (ch !== currentChannel && m.sender_dbid !== myDbid) {
+      const seen = reads[ch];
+      if (!seen || ts(m.created_at) > ts(seen)) {
+        unreadByChannel.set(ch, (unreadByChannel.get(ch) || 0) + 1);
+      }
+    }
+  }
+  paintSide();
+  updateTitleBadge();
+}
+
+function openDebugPanel() {
+  const sheet = openSheet('デバッグログ');
+  const info = el('div', `${DBG.buf.length}件 / エラー${DBG.errors}件`, 'bar-text');
+  sheet.appendChild(info);
+
+  const row = el('div', '', 'chip-row');
+  row.style.padding = '8px 0 0';
+  const mkChip = (label, fn) => { const c = el('button', label, 'chip'); c.addEventListener('click', fn); row.appendChild(c); return c; };
+
+  mkChip('コピー', async () => {
+    await navigator.clipboard.writeText(DBG.text());
+    showToast('ログをコピーしました');
+  });
+  mkChip('ダウンロード', () => {
+    const blob = new Blob([DBG.text()], { type: 'text/plain;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `debug-${new Date().toISOString().replace(/[:.]/g, '-')}.log`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+  mkChip('消去', () => { DBG.clear(); info.textContent = '0件 / エラー0件'; });
+  mkChip('環境情報', () => {
+    DBG.info('env', {
+      ua: navigator.userAgent, online: navigator.onLine,
+      channel: currentChannel, msgs: msgs.length, users: knownUsers.size,
+      storage: storageUsedBytes, db: dbUsedBytes,
+      screen: `${innerWidth}x${innerHeight}`,
+    });
+    showToast('環境情報を記録しました');
+  });
+  sheet.appendChild(row);
+
+  const filterRow = el('div', '', 'chip-row');
+  filterRow.style.padding = '6px 0 0';
+  let filter = 'all';
+  const list = document.createElement('div');
+  list.id = 'dbg-list';
+  const paint = () => {
+    list.textContent = '';
+    for (const e of DBG.buf) {
+      if (filter !== 'all' && e.level !== filter) continue;
+      list.appendChild(DBG.row(e));
+    }
+    list.scrollTop = list.scrollHeight;
+  };
+  for (const [key, label] of [['all', 'すべて'], ['error', 'エラー'], ['warn', '警告'], ['ok', '成功'], ['info', '情報']]) {
+    const c = el('button', label, 'chip' + (key === 'all' ? ' on' : ''));
+    c.addEventListener('click', () => {
+      filter = key;
+      filterRow.querySelectorAll('.chip').forEach((n) => n.classList.remove('on'));
+      c.classList.add('on');
+      paint();
+    });
+    filterRow.appendChild(c);
+  }
+  sheet.appendChild(filterRow);
+  sheet.appendChild(list);
+  paint();
+}
+
+function openBookmarks() {
+  const sheet = openSheet('ブックマーク');
+  const ids = [...bookmarks];
+  if (!ids.length) { sheet.appendChild(el('div', 'まだありません。メッセージのメニューから追加できます。', 'sr-empty')); return; }
+  const list = el('div', '', 'people-list');
+  sheet.appendChild(list);
+  (async () => {
+    const { data } = await supabase.from('messages').select('*').in('id', ids)
+      .order('created_at', { ascending: false });
+    list.textContent = '';
+    for (const m of data || []) {
+      const item = el('div', '', 'sr-item');
+      const h = el('div', '', 'sr-head');
+      h.appendChild(el('span', m.sender_name));
+      h.appendChild(el('span', `${dayLabel(m.created_at)} ${timeLabel(m.created_at)}`));
+      item.appendChild(h);
+      item.appendChild(el('div', previewOf(m) || '画像', 'sr-body'));
+      item.addEventListener('click', () => { closeSheet(); jumpTo(m.id); });
+      list.appendChild(item);
+    }
+  })();
+}
+
+function openGallery() {
+  const sheet = openSheet('画像一覧');
+  const grid = el('div', '', 'gallery');
+  sheet.appendChild(grid);
+  (async () => {
+    const { data } = await supabase.from('messages').select('id,image_url,created_at,sender_name')
+      .not('image_url', 'is', null).order('created_at', { ascending: false }).limit(200);
+    const imgs = (data || []).filter((m) => isImageName(m.file_name || m.image_url));
+    if (!imgs.length) { sheet.appendChild(el('div', '画像はまだありません。', 'sr-empty')); return; }
+    for (const m of imgs) {
+      const img = document.createElement('img');
+      img.loading = 'lazy';
+      img.src = m.image_url;
+      img.alt = `${m.sender_name}さんの画像`;
+      img.title = `${m.sender_name} ・ ${dayLabel(m.created_at)}`;
+      img.addEventListener('click', () => { closeSheet(); openLightbox(m.image_url); });
+      grid.appendChild(img);
+    }
+  })();
+}
+
+function openDateJump() {
+  const sheet = openSheet('日付にジャンプ');
+  const input = document.createElement('input');
+  input.type = 'date';
+  input.style.cssText = 'width:100%;padding:11px;border-radius:10px;border:1.5px solid var(--field-border);background:var(--field-bg);color:var(--text-main);font-size:14px;';
+  sheet.appendChild(input);
+  const go = el('button', 'その日へ移動', 'row-btn primary');
+  go.addEventListener('click', async () => {
+    if (!input.value) return;
+    const { data } = await supabase.from('messages').select('*')
+      .gte('created_at', new Date(input.value + 'T00:00:00').toISOString())
+      .order('created_at', { ascending: true }).limit(1);
+    closeSheet();
+    if (!data || !data.length) { showToast('その日以降のメッセージはありません'); return; }
+    await loadAround(data[0]);
+  });
+  sheet.appendChild(go);
+}
+
+function openSnippets() {
+  const sheet = openSheet('定型文');
+  const row = el('div', '', 'snippet-row');
+  const input = document.createElement('input');
+  input.placeholder = '登録する文章';
+  const addBtn = el('button', '追加', 'chip');
+  addBtn.addEventListener('click', () => {
+    const v = input.value.trim();
+    if (!v) return;
+    snippets.push(v); saveSnippets(); input.value = ''; paint();
+  });
+  row.append(input, addBtn);
+  sheet.appendChild(row);
+  const list = document.createElement('div');
+  sheet.appendChild(list);
+  function paint() {
+    list.textContent = '';
+    if (!snippets.length) { list.appendChild(el('div', 'まだありません。', 'sr-empty')); return; }
+    snippets.forEach((sn, i) => {
+      const item = el('div', '', 'snippet-item');
+      item.appendChild(el('span', sn));
+      const use = el('button', '使う');
+      use.addEventListener('click', () => {
+        textInput.value += (textInput.value ? '\n' : '') + sn;
+        autoGrow(textInput); updateByteCounter(); closeSheet(); textInput.focus();
+      });
+      const del = el('button', '削除');
+      del.addEventListener('click', () => { snippets.splice(i, 1); saveSnippets(); paint(); });
+      item.append(use, del);
+      list.appendChild(item);
+    });
+  }
+  paint();
+}
+
+async function wipeRoom() {
+  if (!confirm('この部屋のメッセージと画像を「全員ぶん」削除します。参加者アカウントは残ります。取り消せません。')) return;
+  if (!confirm('本当に実行しますか？ この操作は元に戻せません。')) return;
+  showToast('削除中…');
+  try {
+    const folders = await supabase.storage.from(BUCKET).list('', { limit: 1000 });
+    const paths = [];
+    for (const f of folders.data || []) {
+      if (f.id) { paths.push(f.name); continue; }
+      const files = await supabase.storage.from(BUCKET).list(f.name, { limit: 1000 });
+      for (const x of files.data || []) paths.push(`${f.name}/${x.name}`);
+    }
+    for (let i = 0; i < paths.length; i += 100) {
+      await supabase.storage.from(BUCKET).remove(paths.slice(i, i + 100));
+    }
+    await supabase.from('reactions').delete().neq('emoji', '');
+    const { error } = await supabase.from('messages').delete().neq('sender_name', '\u0000');
+    if (error) throw error;
+    bookmarks.clear(); saveBookmarks();
+    pinnedMsg = null; paintPinBar();
+    storageUsedBytes = 0; applyStorageFullState();
+    closeSheet();
+    showToast('すべて削除しました');
+    await loadLatest();
+    refreshDbUsage();
+  } catch (e) {
+    showToast('削除に失敗しました: ' + (e.message || e));
+  }
+}
+
+async function bulkDeleteMine(imagesOnly) {
+  const what = imagesOnly ? '自分が送った画像すべて' : '自分の発言すべて';
+  if (!confirm(`${what}を削除します。取り消せません。よろしいですか？`)) return;
+  let q = supabase.from('messages').select('id,image_url,image_bytes').eq('sender_dbid', myDbid);
+  if (imagesOnly) q = q.not('image_url', 'is', null);
+  const { data, error } = await q;
+  if (error) { showToast('取得に失敗しました'); return; }
+  if (!data.length) { showToast('対象はありませんでした'); return; }
+  const paths = data.filter((m) => m.image_url).map((m) => pathFromUrl(m.image_url)).filter(Boolean);
+  if (imagesOnly) {
+    await supabase.from('messages').update({ image_url: null, image_bytes: null })
+      .eq('sender_dbid', myDbid).not('image_url', 'is', null);
+  } else {
+    await supabase.from('messages').delete().eq('sender_dbid', myDbid);
+  }
+  if (paths.length) {
+    for (let i = 0; i < paths.length; i += 100) await supabase.storage.from(BUCKET).remove(paths.slice(i, i + 100));
+  }
+  closeSheet();
+  showToast(`${data.length}件を削除しました`);
+  await loadLatest();
+  refreshStorageUsage();
+}
+
+function updateFavicon() {
+  try {
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const x = c.getContext('2d');
+    x.fillStyle = prefs.accent || '#06c755';
+    x.beginPath(); x.roundRect(2, 2, 60, 60, 14); x.fill();
+    x.fillStyle = '#fff'; x.font = 'bold 34px sans-serif';
+    x.textAlign = 'center'; x.textBaseline = 'middle';
+    const n = totalUnread();
+    x.fillText(n > 0 ? String(Math.min(n, 99)) : '💬', 32, 34);
+    let link = document.querySelector('link[rel="icon"]');
+    if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link); }
+    link.href = c.toDataURL('image/png');
+  } catch (_) {}
+}
+
+let wakeLock = null;
+async function toggleWakeLock(on) {
+  try {
+    if (on) { wakeLock = await navigator.wakeLock.request('screen'); showToast('画面を消えないようにしました'); }
+    else { await wakeLock?.release(); wakeLock = null; }
+  } catch (_) { showToast('この端末では使えません'); }
+}
+
+function toggleFullscreen() {
+  if (document.fullscreenElement) document.exitFullscreen();
+  else document.documentElement.requestFullscreen?.().catch(() => showToast('全画面にできません'));
+}
+
+function installManifest() {
+  const manifest = {
+    name: 'Simple Talk', short_name: 'Simple Talk', start_url: location.pathname,
+    display: 'standalone', background_color: '#e5ebee', theme_color: prefs.accent || '#06c755',
+  };
+  const blob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
+  const link = document.createElement('link');
+  link.rel = 'manifest';
+  link.href = URL.createObjectURL(blob);
+  document.head.appendChild(link);
+}
+installManifest();
+
+function checkPermalink() {
+  const mt = location.hash.match(/^#m=(.+)$/);
+  if (mt) jumpTo(mt[1]);
+}
+window.addEventListener('hashchange', checkPermalink);
+
+async function cleanupOrphanImages(btn) {
+  if (!confirm('どのメッセージからも参照されていない画像を削除します。よろしいですか？')) return;
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = '確認中…';
+
+  try {
+    const referenced = new Set();
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await supabase.from('messages').select('image_url')
+        .not('image_url', 'is', null).range(from, from + 999);
+      if (error) throw error;
+      for (const r of data) referenced.add(pathFromUrl(r.image_url));
+      if (data.length < 1000) break;
+    }
+
+    const all = [];
+    const { data: folders, error: fErr } = await supabase.storage.from(BUCKET)
+      .list('', { limit: 1000 });
+    if (fErr) throw fErr;
+    for (const folder of folders || []) {
+      if (folder.id) { all.push({ path: folder.name, size: folder.metadata?.size }); continue; }
+      const { data: files } = await supabase.storage.from(BUCKET)
+        .list(folder.name, { limit: 1000 });
+      for (const f of files || []) all.push({ path: `${folder.name}/${f.name}`, size: f.metadata?.size });
+    }
+
+    const orphans = all.filter((f) => !referenced.has(f.path));
+    if (!orphans.length) { showToast('掃除する画像はありませんでした'); return; }
+
+    btn.textContent = `${orphans.length}件を削除中…`;
+    const freed = orphans.reduce((n, f) => n + (Number(f.size) || 0), 0);
+    for (let i = 0; i < orphans.length; i += 100) {
+      const { error } = await supabase.storage.from(BUCKET)
+        .remove(orphans.slice(i, i + 100).map((f) => f.path));
+      if (error) throw error;
+    }
+    storageUsedBytes = Math.max(0, storageUsedBytes - freed);
+    applyStorageFullState();
+    showToast(`${orphans.length}件（約${(freed / (1024 * 1024)).toFixed(1)}MB）を削除しました`);
+  } catch (e) {
+    showToast('掃除に失敗しました: ' + (e.message || e));
+  } finally {
+    btn.disabled = false; btn.textContent = label;
+  }
+}
+
+function pathFromUrl(url) {
+  const marker = `/object/public/${BUCKET}/`;
+  const i = String(url).indexOf(marker);
+  return i < 0 ? '' : decodeURIComponent(String(url).slice(i + marker.length).split('?')[0]);
+}
+
+async function exportLog(btn) {
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = '書き出し中…';
+  try {
+    const lines = [];
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await supabase.from('messages').select('*')
+        .order('created_at', { ascending: true }).range(from, from + 999);
+      if (error) throw error;
+      for (const m of data) {
+        const when = new Date(m.created_at).toLocaleString('ja-JP');
+        const body = (m.content || '').replace(/\n/g, '\n    ');
+        lines.push(`[${when}] ${m.sender_name}` + (m.image_url ? '（画像あり）' : ''));
+        if (body) lines.push('    ' + body);
+        if (m.image_url) lines.push('    ' + m.image_url);
+        lines.push('');
+      }
+      if (data.length < 1000) break;
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `talk-log-${new Date().toISOString().slice(0, 10)}.txt`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    showToast('保存しました');
+  } catch (e) {
+    showToast('書き出しに失敗しました: ' + (e.message || e));
+  } finally {
+    btn.disabled = false; btn.textContent = label;
+  }
+}
+
+function notifyIncoming(m) {
+  const mention = mentionsMe(m.content);
+  if (Date.now() < (prefs.muteUntil || 0)) return;
+  if (prefs.mentionOnly && !mention) return;
+  if (mention) navigator.vibrate?.([18, 60, 18]);
+  if (localStorage.getItem(LS.SOUND) !== '0' && (document.visibilityState === 'hidden' || !atBottom || mention)) {
+    playPing(mention);
+  }
+  if (document.visibilityState !== 'hidden') return;
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  const body = m.content ? (m.content.length > 60 ? m.content.slice(0, 60) + '…' : m.content) : '画像を送信しました';
+  const n = new Notification(mention ? `${m.sender_name}（あなた宛て）` : m.sender_name, { body, tag: 'line-chat' });
+  n.onclick = () => { window.focus(); n.close(); };
+}
+
+function playPing(strong) {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const now = audioCtx.currentTime;
+    const notes = strong ? [880, 1174] : [988];
+    notes.forEach((freq, i) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, now + i * 0.12);
+      gain.gain.exponentialRampToValueAtTime(0.16, now + i * 0.12 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + i * 0.12 + 0.28);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(now + i * 0.12);
+      osc.stop(now + i * 0.12 + 0.3);
+    });
+  } catch (_) {  }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    unreadCount = 0;
+    updateJumpButton();
+    if (atBottom) markRead();
+    unreadBoundary = null;
+    supabase.from('users').update({ last_seen: new Date().toISOString() }).eq('dbid', myDbid).then(() => {});
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); toggleSearch(); return; }
+  if (e.key === 'Escape') {
+    if (lightbox.classList.contains('open')) { history.back(); return; }
+    if (currentSheet) { closeSheet(); return; }
+    if (document.querySelector('.action-menu')) { document.querySelector('.action-menu').remove(); return; }
+    if (searchBar.classList.contains('open')) { closeSearch(); return; }
+    if (editingId) { cancelEdit(); return; }
+    if (replyTo) { cancelReply(); return; }
+    if (pendingImage) { clearPendingImage(); return; }
+  }
+});
+
+function showToast(text) {
+  const t = el('div', text, 'toast');
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 2600);
+}
+
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+setInterval(() => { if (document.visibilityState === 'visible') trackPresence(); }, 45000);
+</script>
 </body>
 </html>
